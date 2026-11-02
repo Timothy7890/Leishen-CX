@@ -8,8 +8,9 @@ lidar_topic: /livox/lidar
 imu_topic: /livox/imu
 launch: [lidar.launch]
 devices: []
-# 暂定：雷达中心距新车头约 0.10 m、左右居中（待实测）。车长 0.84 m，几何中心在雷达后方 0.32 m
-base_link_in_body: [-0.32, 0.0]
+# 实测：雷达中心在新车头边线上、左右居中（距两侧各 0.28 m），距车尾 0.84 m；
+# 车体几何中心在雷达后方 0.42 m，加上雷达相对内置 IMU 的偏移 (-0.011, -0.023)
+base_link_in_body: [-0.43, -0.02]
 # 新车头是底盘原来的车尾：线速度取反，角速度不变
 chassis_reverse: true
 # 近处看不到地面无法自动标定：雷达离地 0.675 m，body 原点（内置 IMU）在雷达下方 0.044 m
