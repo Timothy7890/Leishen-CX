@@ -39,8 +39,12 @@ state_set() {
     echo "$1=$2" >> "$STATE_FILE"
 }
 
+boot_time() { awk -v now="$(date +%s)" '{printf "%d", now - $1}' /proc/uptime; }
+
 # 获取互斥锁，防止网页和命令行同时操作
 lock() {
+    # 断电时残留的锁（早于本次开机）直接清掉
+    [[ -d $LOCK_DIR ]] && (($(stat -c %Y "$LOCK_DIR") < $(boot_time))) && rmdir "$LOCK_DIR"
     if ! mkdir "$LOCK_DIR" 2>/dev/null; then
         echo "另一个 start/stop 操作正在进行，请稍后再试" >&2
         exit 2
@@ -79,6 +83,32 @@ wait_topic() {
 
 is_recording() { [[ $(state_get status) == recording || $(state_get status) == stopping ]]; }
 
+any_alive() {
+    local _ p
+    [[ -f $PID_FILE ]] || return 1
+    while read -r _ p; do kill -0 "$p" 2>/dev/null && return 0; done < "$PID_FILE"
+    return 1
+}
+
+# 断电/重启或进程异常退出后，状态文件还在但录制早已停止：标记该次录制为中断并清理状态
+clear_stale() {
+    [[ -n $(state_get status) ]] || return 0
+    if (($(state_get started) < $(boot_time))) || { is_recording && ! any_alive; }; then
+        local session started
+        session=$(state_get session)
+        started=$(state_get started)
+        if [[ -d $session && ! -f $session/info.txt ]]; then
+            cat > "$session/info.txt" << EOF
+status=failed
+start=$(date -d "@$started" '+%Y-%m-%d %H:%M:%S')
+error=录制中断（断电、重启或进程退出），raw.bag 可能未正常关闭（raw.bag.active，可用 rosbag reindex 修复）
+EOF
+        fi
+        rm -f "$STATE_FILE" "$PID_FILE"
+        echo "上次录制异常结束（断电、重启或进程退出），已清理" >&2
+    fi
+}
+
 # ---------------------------------------------------------------- stop（内部）
 shutdown_all() {
     # 先停 rosbag 保证包完整，再停 FAST-LIO 触发保存地图，最后停驱动和 roscore
@@ -98,6 +128,7 @@ cmd_start() {
     local rviz=false
     [[ ${1:-} == --rviz ]] && rviz=true
     lock
+    clear_stale
 
     if is_recording; then
         echo "已在录制中: $(state_get session)" >&2
@@ -175,6 +206,7 @@ cmd_start() {
 # ---------------------------------------------------------------- stop
 cmd_stop() {
     lock
+    clear_stale
     if ! is_recording; then
         echo "当前没有在录制" >&2
         exit 1
@@ -216,6 +248,7 @@ EOF
 # ---------------------------------------------------------------- status
 cmd_status() {
     local status session started now
+    clear_stale 2>/dev/null
     status=$(state_get status)
     if [[ -z $status ]]; then
         echo "status=idle"

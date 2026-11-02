@@ -38,6 +38,8 @@ state_set() {
 }
 
 lock() {
+    # 断电时残留的锁（早于本次开机）直接清掉
+    [[ -d $LOCK_DIR ]] && (($(stat -c %Y "$LOCK_DIR") < $(boot_time))) && rmdir "$LOCK_DIR"
     if ! mkdir "$LOCK_DIR" 2> /dev/null; then
         echo "另一个 start/stop 操作正在进行，请稍后再试" >&2
         exit 2
@@ -52,6 +54,24 @@ launch() {
 }
 
 pid_of() { [[ -f $PID_FILE ]] && awk -v n="$1" '$1 == n {print $2}' "$PID_FILE"; }
+
+boot_time() { awk -v now="$(date +%s)" '{printf "%d", now - $1}' /proc/uptime; }
+
+any_alive() {
+    local _ p
+    [[ -f $PID_FILE ]] || return 1
+    while read -r _ p; do kill -0 "$p" 2> /dev/null && return 0; done < "$PID_FILE"
+    return 1
+}
+
+# 断电/重启或进程异常退出后，状态文件还在但导航早已停止：清理掉，否则无法再次启动
+clear_stale() {
+    [[ -n $(state_get status) ]] || return 0
+    if (($(state_get started) < $(boot_time))) || { [[ $(state_get status) == running ]] && ! any_alive; }; then
+        rm -f "$STATE_FILE" "$PID_FILE"
+        echo "上次导航异常结束（断电、重启或进程退出），已清理" >&2
+    fi
+}
 
 stop_proc() {
     local name=$1 timeout=${2:-10} pid
@@ -83,6 +103,7 @@ cmd_start() {
     lock
     [[ -n $session && -f $session/nav/meta.json ]] || { echo "不是成熟地图: $session" >&2; exit 1; }
     session=$(cd "$session" && pwd)
+    clear_stale
     if [[ -n $(state_get status) ]]; then
         echo "导航已在运行: $(state_get session)" >&2; exit 1
     fi
@@ -151,6 +172,7 @@ cmd_start() {
 
 cmd_stop() {
     lock
+    clear_stale
     [[ -n $(state_get status) ]] || { echo "导航未运行" >&2; exit 1; }
     log "停止导航"
     shutdown_all
@@ -160,6 +182,7 @@ cmd_stop() {
 
 cmd_status() {
     local status
+    clear_stale 2> /dev/null
     status=$(state_get status)
     if [[ -z $status ]]; then
         echo "status=idle"
