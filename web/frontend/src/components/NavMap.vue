@@ -119,7 +119,7 @@ function draw() {
     }
   }
 
-  if (st.goal && ['pending', 'active'].includes(st.goal_state)) arrow(ctx, ...st.goal, 13, '#f59e0b')
+  if (st.goal && ['preview', 'pending', 'active'].includes(st.goal_state)) arrow(ctx, ...st.goal, 13, '#f59e0b')
 
   if (st.pose) {
     // 车身轮廓：pose 为雷达位置，footprint = [前, 后, 半宽]（相对雷达，见 config/nav/costmap_common.yaml）

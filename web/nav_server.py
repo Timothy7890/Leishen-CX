@@ -9,7 +9,7 @@
     POST /api/nav/start             {"session", "dry_run"}
     POST /api/nav/stop
     GET  /api/nav/stream            实时状态 SSE（转发 nav_bridge）
-    POST /api/nav/{reloc,goal,cancel,estop,speed,heartbeat}   转发 nav_bridge
+    POST /api/nav/{reloc,goal,go,cancel,estop,speed,heartbeat}   转发 nav_bridge
 """
 import os
 import threading
@@ -23,7 +23,7 @@ from webcommon import (DATA_ROOT, PROJECT_DIR, BaseHandler, LastError, last_line
 PORT = int(os.environ.get("NAV_WEB_PORT", "7011"))
 NAV_SH = PROJECT_DIR / "nav.sh"
 BRIDGE = "http://127.0.0.1:7013"
-BRIDGE_CMDS = {"reloc", "goal", "cancel", "estop", "speed", "heartbeat"}
+BRIDGE_CMDS = {"reloc", "goal", "go", "cancel", "estop", "speed", "heartbeat"}
 
 busy = threading.Lock()
 last_error = LastError()

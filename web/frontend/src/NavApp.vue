@@ -11,7 +11,7 @@ const dryRun = ref(true)
 const state = ref(null)             // nav_bridge 推送
 const mode = ref('view')            // view | goal | reloc
 const msg = ref('')
-const speed = ref(0.3)
+const speed = ref(0.5)
 let es = null, statusTimer = null, hbTimer = null
 
 const map = computed(() => maps.value.find(m => m.session === selected.value))
@@ -26,9 +26,11 @@ const localized = computed(() => loc.value.state === 'localized')
 const relocSent = ref(false)
 const relocBusy = computed(() => relocSent.value || loc.value.state === 'relocalizing')
 watch(() => loc.value.state, s => { if (s === 'relocalizing') relocSent.value = false })
+// 滑块跟随实际限速（刷新页面或重启导航后不会显示成默认值）
+watch(() => state.value?.speed, v => { if (v != null) speed.value = v })
 
 const LOC_LABEL = { unlocalized: '未定位', relocalizing: '重定位中…', localized: '已定位', lost: '定位丢失' }
-const GOAL_LABEL = { idle: '无目标', pending: '等待执行', active: '前往目标中', succeeded: '已到达',
+const GOAL_LABEL = { idle: '无目标', preview: '路线已规划，等待出发', pending: '等待执行', active: '前往目标中', succeeded: '已到达',
   aborted: '无法到达（路径不通）', canceled: '已取消', rejected: '目标被拒绝' }
 
 async function refreshStatus() {
@@ -76,7 +78,11 @@ async function reloc(body) {
 }
 
 const autoReloc = () => reloc({ mode: 'auto' })
+const goalActive = computed(() => ['pending', 'active'].includes(state.value?.goal_state))
+const preview = computed(() => state.value?.goal_state === 'preview')
 const cancelGoal = () => act(() => navCmd('cancel'), '')
+// 点选目标只规划路线；看过路线后点出发，再确认一次车才会动
+const go = () => confirm('确认出发？小车将沿绿色路线前往目标') && act(() => navCmd('go'), '')
 const toggleEstop = () => act(() => navCmd('estop', { on: !estop.value }), '')
 const setSpeed = () => act(() => navCmd('speed', { v: speed.value }), '')
 
@@ -163,9 +169,10 @@ onUnmounted(() => {
           <div class="muted small">目标：{{ GOAL_LABEL[state?.goal_state] || '-' }}</div>
           <div class="muted small num">当前速度 {{ gate.v ?? 0 }} m/s · {{ gate.w ?? 0 }} rad/s</div>
           <div class="btns">
-            <button :disabled="!localized || estop" :class="{ active: mode === 'goal' }"
+            <button :disabled="!localized || estop || goalActive" :class="{ active: mode === 'goal' }"
                     @click="mode = mode === 'goal' ? 'view' : 'goal'">点选目标</button>
-            <button :disabled="!['pending', 'active'].includes(state?.goal_state)" @click="cancelGoal">取消目标</button>
+            <button class="go" :disabled="!preview || !localized || estop" @click="go">出发</button>
+            <button :disabled="!preview && !goalActive" @click="cancelGoal">取消目标</button>
           </div>
           <div class="speed">
             <span>限速 {{ speed.toFixed(2) }} m/s</span>

@@ -41,6 +41,10 @@ OBST_LOW, OBST_HIGH = 0.10, 1.6     # 地面以上该高度区间才算障碍
 MIN_POINTS = 5              # 区域内至少这么多点才判为障碍（抗噪）
 CLEAR_HOLD = 2.0            # 障碍消失后等待秒数
 MAX_W = 0.8
+# 行驶中输出按加速度限制平滑变化（避免一顿一顿）；需要停车时直接输出零速
+ACC_UP, ACC_DOWN = 0.5, 1.0    # m/s²
+ACC_W = 2.0                    # rad/s²
+DT = 0.1
 CMD_TIMEOUT = 0.5
 SCAN_TIMEOUT = 0.5
 HEARTBEAT_TIMEOUT = 5.0
@@ -52,7 +56,7 @@ class Gate:
         self.cmd, self.cmd_t = Twist(), 0.0
         self.scan_t = 0.0
         self.estop = False
-        self.max_speed = float(rospy.get_param("~max_speed", 0.3))
+        self.max_speed = float(rospy.get_param("~max_speed", 0.5))
         self.heartbeat = 0.0
         self.loc_state = "unlocalized"
         # body 坐标系下的地面高度；传感器配置未给出时启动后自动标定
@@ -62,6 +66,7 @@ class Gate:
         self.blocked_since = None
         self.clear_since = None
         self.state = None
+        self.out_v = self.out_w = 0.0
 
         self.pub_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
         self.pub_status = rospy.Publisher("/nav/gate_status", String, queue_size=1, latch=True)
@@ -162,6 +167,10 @@ class Gate:
         last_pub = 0.0
         while not rospy.is_shutdown():
             state, msg, v, w = self.decide()
+            if state == "moving":
+                v = min(v, self.out_v + ACC_UP * DT) if v >= self.out_v else max(v, self.out_v - ACC_DOWN * DT)
+                w = max(self.out_w - ACC_W * DT, min(self.out_w + ACC_W * DT, w))
+            self.out_v, self.out_w = v, w
             out = Twist()
             out.linear.x, out.angular.z = v, w
             self.pub_cmd.publish(out)

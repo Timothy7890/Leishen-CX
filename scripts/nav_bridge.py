@@ -3,10 +3,11 @@
 
     GET  /stream     SSE，每 0.2 s 一个 state 事件：位姿、定位/安全门/串口状态、目标、全局路径、障碍点
     POST /reloc      {"mode": "auto"} 或 {"mode": "manual", "x", "y", "yaw"}
-    POST /goal       {"x", "y", "yaw"}
+    POST /goal       {"x", "y", "yaw"}  只规划路线供网页预览，车不动
+    POST /go         按已预览的路线出发（网页上还需确认一次）
     POST /cancel
     POST /estop      {"on": true|false}
-    POST /speed      {"v": 0.3}
+    POST /speed      {"v": 0.5}
     POST /heartbeat  网页每秒调用一次；超过 5 s 未调用，safety_gate 停车
 """
 import os
@@ -28,6 +29,7 @@ from actionlib_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from nav_msgs.msg import OccupancyGrid, Path
+from nav_msgs.srv import GetPlan
 from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float32, Float64, String
@@ -55,10 +57,12 @@ class Bridge:
         self.T_mb = None
         self.loc = self.gate = self.serial = {}
         self.goal = None
+        self.goal_pose = None       # 已规划待出发的目标（PoseStamped）
+        self.goal_preview = False
         self.goal_sent = False
         self.plan = []
         self.scan = ""
-        self.speed = 0.3
+        self.speed = 0.5
         self.estop = False
         self.costmap = None
 
@@ -78,6 +82,7 @@ class Bridge:
                          lambda m: setattr(self, "costmap", m), queue_size=1)
         rospy.Subscriber(LIDAR_TOPIC, PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
         self.mb = actionlib.SimpleActionClient("move_base", MoveBaseAction)
+        self.make_plan = rospy.ServiceProxy("/move_base/make_plan", GetPlan)
         self.dwa = None
 
     def _set(self, key, msg):
@@ -94,10 +99,14 @@ class Bridge:
             self.pose = [round(p.x, 3), round(p.y, 3), round(float(R.as_euler("zyx")[0]), 4)]
 
     def on_plan(self, msg):
-        pts = [(round(s.pose.position.x, 2), round(s.pose.position.y, 2)) for s in msg.poses]
-        step = max(1, len(pts) // 300)
         with self.lock:
-            self.plan = pts[::step] + pts[-1:] if pts else []
+            self.plan = self.sample_plan(msg)
+
+    @staticmethod
+    def sample_plan(path):
+        pts = [(round(s.pose.position.x, 2), round(s.pose.position.y, 2)) for s in path.poses]
+        step = max(1, len(pts) // 300)
+        return pts[::step] + pts[-1:] if pts else []
 
     def on_cloud(self, msg):
         """障碍高度区间内的点，变换到地图系供网页显示（2 Hz）。"""
@@ -126,6 +135,8 @@ class Bridge:
 
     # ------------------------------------------------------------ 指令
     def goal_state(self):
+        if self.goal_preview:
+            return "preview"
         if not self.goal_sent:
             return "idle"
         return GOAL_STATES.get(self.mb.get_state(), "idle")
@@ -153,7 +164,10 @@ class Bridge:
         nx, ny = ox + (cc[j] + c0 + 0.5) * res, oy + (rr[j] + r0 + 0.5) * res
         return nx, ny, f"目标离障碍太近，已移动 {math.hypot(nx - x, ny - y):.2f} m 到最近的可达位置"
 
-    def send_goal(self, x, y, yaw):
+    def plan_goal(self, x, y, yaw):
+        """点选目标：只用 move_base 的 make_plan 规划路线给网页预览，车不动；出发见 go()。"""
+        if self.goal_sent and self.goal_state() in ("pending", "active"):
+            return False, "正在前往目标，请先取消"
         if not self.mb.wait_for_server(rospy.Duration(2.0)):
             return False, "move_base 未就绪"
         if self.loc.get("state") != "localized":
@@ -161,18 +175,46 @@ class Bridge:
         x, y, note = self.snap_goal(x, y)
         if x is None:
             return False, note
+        gp = PoseStamped()
+        gp.header.frame_id, gp.header.stamp = "map", rospy.Time.now()
+        gp.pose.position.x, gp.pose.position.y = x, y
+        gp.pose.orientation.z, gp.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+        try:
+            self.make_plan.wait_for_service(2.0)
+            # start 不填 frame_id：move_base 用车当前位姿作为起点
+            path = self.make_plan(start=PoseStamped(), goal=gp, tolerance=0.0).plan
+        except (rospy.ServiceException, rospy.ROSException) as e:
+            return False, f"路线规划失败：{e}"
+        if not path.poses:
+            return False, "规划不出路线（目标不可达）"
+        pts = np.array([(s.pose.position.x, s.pose.position.y) for s in path.poses])
+        length = float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)))
+        with self.lock:
+            self.goal, self.goal_pose = [round(x, 3), round(y, 3), round(yaw, 4)], gp
+            self.goal_preview, self.goal_sent = True, False
+            self.plan = self.sample_plan(path)
+        return True, (f"{note}；" if note else "") + f"路线约 {length:.1f} m，确认无误后点「出发」"
+
+    def go(self):
+        if not self.goal_preview:
+            return False, "请先点选目标"
+        if self.estop:
+            return False, "急停中"
+        if self.loc.get("state") != "localized":
+            return False, "请先完成定位"
         g = MoveBaseGoal()
-        g.target_pose.header.frame_id, g.target_pose.header.stamp = "map", rospy.Time.now()
-        g.target_pose.pose.position.x, g.target_pose.pose.position.y = x, y
-        qz, qw = math.sin(yaw / 2), math.cos(yaw / 2)
-        g.target_pose.pose.orientation.z, g.target_pose.pose.orientation.w = qz, qw
+        g.target_pose = self.goal_pose
+        g.target_pose.header.stamp = rospy.Time.now()
         self.mb.send_goal(g)
-        self.goal, self.goal_sent = [round(x, 3), round(y, 3), round(yaw, 4)], True
-        return True, note or "目标已下发"
+        self.goal_preview, self.goal_sent = False, True
+        return True, "出发"
 
     def cancel(self):
         if self.goal_sent:
             self.mb.cancel_all_goals()
+        with self.lock:
+            self.goal_preview = False
+            self.plan = []
         return True, "已取消目标"
 
     def set_estop(self, on):
@@ -248,7 +290,9 @@ class Handler(BaseHTTPRequestHandler):
                     bridge.pub_reloc.publish(String(json.dumps(body)))
                     ok, msg = True, "已开始重定位"
             elif p == "/goal":
-                ok, msg = bridge.send_goal(float(body["x"]), float(body["y"]), float(body["yaw"]))
+                ok, msg = bridge.plan_goal(float(body["x"]), float(body["y"]), float(body["yaw"]))
+            elif p == "/go":
+                ok, msg = bridge.go()
             elif p == "/cancel":
                 ok, msg = bridge.cancel()
             elif p == "/estop":
