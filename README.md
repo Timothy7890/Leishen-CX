@@ -69,6 +69,10 @@ Leishen-CX/
 | FAST-LIO `fov_degree` | 180 | 360 |
 | FAST-LIO `blind`（近距离盲区） | 2 m | 0.5 m |
 | FAST-LIO `dense_publish_en` | true（保存每帧全部点） | false（保存 0.5 m 降采样后的点） |
+| FAST-LIO `timestamp_unit` | 2（微秒，错误） | 0（秒，与驱动输出一致） |
+
+`timestamp_unit` 错误会使 FAST-LIO 的运动补偿失效，转弯后航向误差累积，往返路段的墙面出现重影。
+2026-11-02 21:20 之前的录制受影响，可用其 `raw.bag` 离线重建。
 
 `map.pcd` 为降采样地图，内存占用小，可长时间录制；需要高密度地图时用 `raw.bag` 离线重建。
 原始数据包约 1.1 GB/分钟，注意剩余磁盘空间。

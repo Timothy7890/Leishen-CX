@@ -1,5 +1,6 @@
 # FAST-LIO 参数（360° 版本）。由 record.sh 通过 rosparam load 加载到全局命名空间。
-# 相对原 ~/workspace/fast_lio 配置的改动：fov_degree 180 -> 360，blind 2 -> 0.5，dense_publish_en true -> false
+# 相对原 ~/workspace/fast_lio 配置的改动：fov_degree 180 -> 360，blind 2 -> 0.5，
+# dense_publish_en true -> false，timestamp_unit 2 -> 0
 
 common:
     lid_topic:  "/velodyne_points"
@@ -11,7 +12,9 @@ preprocess:
     lidar_type: 2                # 2: Velodyne 格式（镭神驱动输出兼容）
     scan_line: 32
     scan_rate: 10                # Hz
-    timestamp_unit: 2            # 点云 time 字段单位: 0-s, 1-ms, 2-us, 3-ns
+    # 点云 time 字段单位: 0-s, 1-ms, 2-us, 3-ns。镭神驱动输出的是秒（每帧 0~0.1）；
+    # 原配置误设为 2，FAST-LIO 运动补偿失效，转弯后地图出现重影
+    timestamp_unit: 0
     blind: 0.5                   # 小于该距离 (m) 的点不参与建图
 
 mapping:
