@@ -332,7 +332,10 @@ class Localizer:
     # ------------------------------------------------------------ 主循环
     def run(self):
         start = time.time()
-        auto_done = False
+        # 启动参数 _auto_reloc:=false 时不自动重定位，等网页手动点选（或点自动重定位）
+        auto_done = not rospy.get_param("~auto_reloc", True)
+        if auto_done:
+            self.status(state="unlocalized", msg="请点「手动点选」在地图上指定车的位置，或点「自动重定位」")
         last_track = 0.0
         rate = rospy.Rate(10)
         while not rospy.is_shutdown():

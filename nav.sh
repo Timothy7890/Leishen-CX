@@ -3,7 +3,8 @@
 #  在成熟地图上导航
 #
 #  用法:
-#    ./nav.sh start <录制目录> [--dry-run]   启动定位与导航（--dry-run 不向小车发指令）
+#    ./nav.sh start <录制目录> [--dry-run] [--manual-reloc]
+#                     启动定位与导航（--dry-run 不向小车发指令；--manual-reloc 不自动重定位，等网页手动点选）
 #    ./nav.sh stop
 #    ./nav.sh status
 #
@@ -97,8 +98,14 @@ shutdown_all() {
 }
 
 cmd_start() {
-    local session=$1 dry=false
-    [[ ${2:-} == --dry-run ]] && dry=true
+    local session=$1 dry=false auto_reloc=true opt
+    for opt in "${@:2}"; do
+        case $opt in
+            --dry-run) dry=true ;;
+            --manual-reloc) auto_reloc=false ;;
+            *) echo "未知参数: $opt" >&2; exit 1 ;;
+        esac
+    done
     # 当前传感器：SENSOR SENSOR_DIR LIDAR_IP LIDAR_TOPIC IMU_TOPIC SENSOR_LAUNCH SENSOR_DEVICES BASE_XY（见 scripts/vehicle.py）
     sensor_vars=$(python3 "$PROJECT_DIR/scripts/vehicle.py" --shell) && eval "$sensor_vars" || exit 1
     lock
@@ -122,6 +129,7 @@ cmd_start() {
     state_set status starting
     state_set session "$session"
     state_set dry_run "$dry"
+    state_set auto_reloc "$auto_reloc"
     state_set started "$(date +%s)"
 
     fail() {
@@ -150,7 +158,7 @@ cmd_start() {
     wait_topic /Odometry 20 || fail "FAST-LIO 未输出里程计"
 
     log "启动地图定位（自动重定位）"
-    launch localizer python3 "$PROJECT_DIR/scripts/localizer.py" "$session/nav"
+    launch localizer python3 "$PROJECT_DIR/scripts/localizer.py" "$session/nav" "_auto_reloc:=$auto_reloc"
     # base_link = 车体几何中心，位置见 sensor.yaml 的 base_link_in_body
     launch base_tf rosrun tf2_ros static_transform_publisher $BASE_XY 0 0 0 0 body base_link
     launch map_server rosrun map_server map_server "$session/nav/grid.yaml" _frame_id:=map
@@ -199,6 +207,7 @@ cmd_status() {
     echo "status=$status"
     echo "session=$(state_get session)"
     echo "dry_run=$(state_get dry_run)"
+    echo "auto_reloc=$(state_get auto_reloc)"
     echo "elapsed_s=$(($(date +%s) - $(state_get started)))"
 }
 
@@ -207,7 +216,7 @@ case ${1:-} in
     stop)   cmd_stop ;;
     status) cmd_status ;;
     *)
-        echo "用法: $0 start <录制目录> [--dry-run] | stop | status"
+        echo "用法: $0 start <录制目录> [--dry-run] [--manual-reloc] | stop | status"
         exit 1
         ;;
 esac

@@ -8,6 +8,9 @@ const selected = ref('')            // 录制目录名
 const traj = ref([])
 const nav = ref({ status: 'connecting' })
 const dryRun = ref(true)
+// 启动后的重定位方式，记在本浏览器
+const relocMode = ref(localStorage.getItem('nav.relocMode') === 'manual' ? 'manual' : 'auto')
+watch(relocMode, v => { try { localStorage.setItem('nav.relocMode', v) } catch {} })
 const state = ref(null)             // nav_bridge 推送
 const mode = ref('view')            // view | goal | reloc
 const msg = ref('')
@@ -66,7 +69,11 @@ async function act(fn, pending) {
   return r
 }
 
-const start = () => act(() => navStart(selected.value, dryRun.value), '正在启动导航（约 20 秒）…')
+const start = async () => {
+  const r = await act(() => navStart(selected.value, dryRun.value, relocMode.value), '正在启动导航（约 20 秒）…')
+  // 手动重定位：启动后直接进入点选模式
+  if (r.ok && relocMode.value === 'manual') mode.value = 'reloc'
+}
 const stop = () => confirm('停止导航？') && act(navStop, '正在停止…')
 async function reloc(body) {
   if (relocBusy.value) return
@@ -143,6 +150,11 @@ onUnmounted(() => {
           <span v-else class="tag" :class="nav.dry_run === 'true' ? 'warn' : 'live'">
             {{ nav.dry_run === 'true' ? '空跑模式' : '实车模式' }}</span>
         </div>
+        <div v-if="!running" class="row reloc-mode">
+          <span>启动后</span>
+          <label class="chk"><input v-model="relocMode" type="radio" value="auto" :disabled="busy" />自动重定位</label>
+          <label class="chk"><input v-model="relocMode" type="radio" value="manual" :disabled="busy" />手动点选位置</label>
+        </div>
         <div class="btns">
           <button class="go" :disabled="running || busy || !selected || nav.recording" @click="start">启动导航</button>
           <button class="stop" :disabled="!running || busy" @click="stop">停止导航</button>
@@ -209,6 +221,7 @@ h1 { font-size: 20px; margin: 0; }
 select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
 .row { margin: 8px 0; font-size: 13px; }
 .chk { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.reloc-mode { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .btns { display: flex; gap: 8px; margin-top: 10px; }
 .btns button {
   flex: 1; padding: 9px; border-radius: 8px; border: 1px solid var(--line); background: transparent;

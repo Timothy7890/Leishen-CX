@@ -6,7 +6,7 @@
     GET  /api/maps/<录制>/grid.png  2D 栅格图
     GET  /api/maps/<录制>/traj      建图轨迹 [[x, y], ...]
     GET  /api/nav/status            导航运行状态
-    POST /api/nav/start             {"session", "dry_run"}
+    POST /api/nav/start             {"session", "dry_run", "reloc": "auto"|"manual"}
     POST /api/nav/stop
     GET  /api/nav/stream            实时状态 SSE（转发 nav_bridge）
     POST /api/nav/{reloc,goal,go,cancel,estop,speed,heartbeat}   转发 nav_bridge
@@ -98,7 +98,8 @@ class Handler(BaseHandler):
             if not busy.acquire(blocking=False):
                 return self.send(409, {"ok": False, "msg": "正在执行其他操作"})
             try:
-                args = ["start", str(d)] + (["--dry-run"] if body.get("dry_run") else [])
+                args = ["start", str(d)] + (["--dry-run"] if body.get("dry_run") else []) \
+                    + (["--manual-reloc"] if body.get("reloc") == "manual" else [])
                 code, out = run_script(NAV_SH, *args, timeout=150)
             finally:
                 busy.release()
