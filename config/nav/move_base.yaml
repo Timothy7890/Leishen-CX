@@ -49,9 +49,12 @@ DWAPlannerROS:
   min_vel_trans: 0.05
   max_vel_theta: 0.6
   min_vel_theta: 0.2
-  acc_lim_x: 0.5                # 平顺起步；安全门再按同样的加速度限制输出
+  # DWA 每个周期只在 当前速度 ± 加速度×0.1 s 内采样，且低于 min_vel_trans / min_vel_theta 的速度无效：
+  # 加速度太小时静止状态下所有候选都无效，车原地不动（"DWA planner failed to produce path"）。
+  # 必须 acc_lim_x×0.1 > min_vel_trans、acc_lim_theta×0.1 > min_vel_theta；平顺起步由 safety_gate 限制输出加速度
+  acc_lim_x: 1.0
   acc_lim_y: 0.0
-  acc_lim_theta: 1.5
+  acc_lim_theta: 3.0
   xy_goal_tolerance: 0.15
   yaw_goal_tolerance: 0.15
   latch_xy_goal_tolerance: true
