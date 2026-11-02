@@ -172,7 +172,8 @@ onUnmounted(() => {
             <input v-model.number="speed" type="range" min="0.1" max="0.6" step="0.05" @change="setSpeed" />
           </div>
           <div class="muted small">
-            底盘：{{ serial.dry_run ? '空跑（不发送）' : serial.connected ? '已连接 /dev/car' : '未连接' }}
+            底盘：{{ serial.dry_run ? '空跑（不发送）' : !serial.connected ? '未连接'
+              : serial.chassis === 'ok' ? '已连接，底盘接受指令' : '已连接 /dev/car' }}
             <span v-if="serial.error" class="err">{{ serial.error }}</span>
           </div>
         </div>

@@ -7,7 +7,7 @@ Modbus RTU 写多个寄存器（功能码 0x10），float32 字序交换（CDAB�
     角速度  寄存器 0x015E
 
 与原脚本的区别：以 10 Hz 固定频率发送最新指令；超过 CMD_TIMEOUT 未收到指令发零速；
-退出时发零速。空跑模式（~dry_run 或环境变量 NAV_DRY_RUN=1）不打开串口，只记录。
+退出时发零速；读取底盘应答（面板不在 ROS 控制时底盘回 01 90 08 拒绝）。空跑模式（~dry_run 或环境变量 NAV_DRY_RUN=1）不打开串口，只记录。
 状态以 JSON 发布在 /nav/serial_status。
 """
 import json
@@ -49,6 +49,7 @@ class CarSerial:
         self.cmd_t = 0.0
         self.ser = None
         self.error = ""
+        self.chassis = "unknown"    # 底盘最近一次应答：ok / rejected / no_reply
         self.pub = rospy.Publisher("/nav/serial_status", String, queue_size=1, latch=True)
         rospy.Subscriber("/cmd_vel", Twist, self.on_cmd, queue_size=1)
 
@@ -69,13 +70,37 @@ class CarSerial:
             self.error = f"无法打开 {PORT}: {e}"
             return False
 
+    def reply(self):
+        """读一条应答：正常为回显 01 10 <寄存器> 00 02 + CRC（8 字节），拒绝为 01 90 <异常码> + CRC（5 字节）。"""
+        head = self.ser.read(2)
+        if len(head) < 2:
+            return "no_reply", None
+        if head[1] == 0x90:
+            body = self.ser.read(3)
+            return "rejected", body[0] if body else None
+        self.ser.read(6)
+        return "ok", None
+
     def send(self, v, w):
         if self.dry:
             return
         try:
-            self.ser.reset_input_buffer()   # 丢弃底盘的应答帧
-            self.ser.write(frame(REG_LINEAR, v))
-            self.ser.write(frame(REG_ANGULAR, w))
+            self.ser.reset_input_buffer()
+            results = []
+            # 逐帧等应答，帧之间留出 Modbus RTU 要求的间隔
+            for reg, val in ((REG_LINEAR, v), (REG_ANGULAR, w)):
+                self.ser.write(frame(reg, val))
+                results.append(self.reply())
+            states = {r[0] for r in results}
+            if "rejected" in states:
+                code = next(c for s, c in results if s == "rejected")
+                self.chassis = "rejected"
+                self.error = (f"底盘拒绝速度指令（Modbus 异常码 0x{code or 0:02x}），"
+                              "请确认操作面板已切换到 ROS 控制")
+            elif "no_reply" in states:
+                self.chassis, self.error = "no_reply", "底盘无应答，请检查底盘电源和串口线"
+            else:
+                self.chassis, self.error = "ok", ""
         except Exception as e:
             self.error = f"串口写入失败: {e}"
             try:
@@ -96,6 +121,7 @@ class CarSerial:
                 last_pub = time.time()
                 self.pub.publish(String(json.dumps(
                     {"dry_run": self.dry, "connected": self.dry or self.ser is not None,
+                     "chassis": "dry_run" if self.dry else self.chassis,
                      "error": self.error, "v": round(v, 3), "w": round(w, 3)}, ensure_ascii=False)))
             rate.sleep()
 

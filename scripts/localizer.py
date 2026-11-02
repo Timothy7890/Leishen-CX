@@ -114,6 +114,10 @@ class Localizer:
 
         self.pub_status = rospy.Publisher("/nav/loc_status", String, queue_size=1, latch=True)
         self.pub_pose = rospy.Publisher("/nav/robot_pose", PoseStamped, queue_size=1)
+        # move_base 的局部规划需要当前速度；FAST-LIO 的 /Odometry 不带速度，这里由相邻位姿差分得到
+        self.pub_odom = rospy.Publisher("/odom", Odometry, queue_size=5)
+        self.prev_odom = None       # (t, T)
+        self.vel = np.zeros(2)      # 车体系前进速度 (m/s)、偏航角速度 (rad/s)，平滑后
         self.tfb = tf2_ros.TransformBroadcaster()
         rospy.Subscriber("/Odometry", Odometry, self.on_odom, queue_size=20)
         rospy.Subscriber("/velodyne_points", PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
@@ -143,6 +147,7 @@ class Localizer:
             while self.pending and self.pending[0][0] < stamp + 0.03:
                 self.pending.popleft()
             T_mo = self.T_map_odom
+        self.publish_velocity(msg, stamp, T)
         if T_mo is None:
             return
         self.publish_tf(T_mo, msg.header.stamp)
@@ -153,6 +158,20 @@ class Localizer:
         qq = Rotation.from_matrix(T_mb[:3, :3]).as_quat()
         ps.pose.orientation.x, ps.pose.orientation.y, ps.pose.orientation.z, ps.pose.orientation.w = qq
         self.pub_pose.publish(ps)
+
+    def publish_velocity(self, msg, stamp, T):
+        prev, self.prev_odom = self.prev_odom, (stamp, T)
+        if prev is None or not 0.02 < stamp - prev[0] < 0.5:
+            return
+        dt, Rp = stamp - prev[0], prev[1][:3, :3]
+        v = (Rp.T @ (T[:3, 3] - prev[1][:3, 3]))[0] / dt
+        w = Rotation.from_matrix(Rp.T @ T[:3, :3]).as_rotvec()[2] / dt
+        self.vel = 0.5 * self.vel + 0.5 * np.array([v, w])
+        out = Odometry()
+        out.header.stamp, out.header.frame_id, out.child_frame_id = msg.header.stamp, "camera_init", "base_link"
+        out.pose.pose = msg.pose.pose
+        out.twist.twist.linear.x, out.twist.twist.angular.z = self.vel
+        self.pub_odom.publish(out)
 
     def publish_tf(self, T, stamp):
         ts = TransformStamped()
