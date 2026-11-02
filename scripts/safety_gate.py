@@ -33,7 +33,9 @@ from vehicle import FRONT, HALF_WID, SELF_MARGIN, SWEEP_R, inside_body, lidar_to
 
 # 车身轮廓来自 config/nav/costmap_common.yaml（见 scripts/vehicle.py），轮廓内的点视为车自身
 FRONT_MIN, FRONT_PER_V = 0.5, 1.0   # 前方检测距离 = 车头外 0.5 m + 1.0 s × 速度
-SIDE_MARGIN = 0.1           # 前方检测区左右各比车宽多出
+# 前方检测区左右各比车宽多出。固定的墙由路径规划避开，这里主要拦突然出现的障碍；
+# 取 0.1 时侧屋窄通道（车身右侧离墙 6~10 cm）会一直误停，故取 0.03
+SIDE_MARGIN = 0.03
 TURN_MARGIN = 0.1           # 原地转向：车角扫过的圆再外扩
 OBST_LOW, OBST_HIGH = 0.10, 1.6     # 地面以上该高度区间才算障碍
 MIN_POINTS = 5              # 区域内至少这么多点才判为障碍（抗噪）
