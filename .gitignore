@@ -6,6 +6,9 @@ catkin_ws/build.log
 catkin_ws/.catkin_workspace
 # 指向 /opt/ros/noetic 的符号链接，catkin_make 自动创建
 catkin_ws/src/CMakeLists.txt
+# Livox-SDK2 编译产物
+thirdparty/Livox-SDK2/build/
+thirdparty/livox_sdk2/
 
 # FAST-LIO 运行时输出（地图由 record.sh 移到数据目录）
 catkin_ws/src/FAST_LIO/PCD/*
@@ -19,6 +22,8 @@ catkin_ws/src/FAST_LIO/Log/*
 
 # 运行时状态
 run/
+# 本车当前使用的传感器（cx32 / mid360），见 scripts/vehicle.py
+config/sensor
 
 # 前端依赖与构建产物（npm install / npm run build 生成）
 web/frontend/node_modules/

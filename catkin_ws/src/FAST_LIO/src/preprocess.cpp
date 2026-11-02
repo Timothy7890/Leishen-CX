@@ -41,7 +41,7 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
   point_filter_num = pfilt_num;
 }
 
-void Preprocess::process(const livox_ros_driver::CustomMsg::ConstPtr &msg, PointCloudXYZI::Ptr &pcl_out)
+void Preprocess::process(const livox_ros_driver2::CustomMsg::ConstPtr &msg, PointCloudXYZI::Ptr &pcl_out)
 {  
   avia_handler(msg);
   *pcl_out = pl_surf;
@@ -81,6 +81,10 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
   case MARSIM:
     sim_handler(msg);
     break;
+
+  case LIVOX_PC2:
+    livox_pc2_handler(msg);
+    break;
   
   default:
     printf("Error LiDAR Type");
@@ -89,7 +93,7 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
   *pcl_out = pl_surf;
 }
 
-void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
+void Preprocess::avia_handler(const livox_ros_driver2::CustomMsg::ConstPtr &msg)
 {
   pl_surf.clear();
   pl_corn.clear();
@@ -476,6 +480,38 @@ void Preprocess::sim_handler(const sensor_msgs::PointCloud2::ConstPtr &msg) {
         added_pt.normal_y = 0;
         added_pt.normal_z = 0;
         added_pt.curvature = 0.0;
+        pl_surf.points.push_back(added_pt);
+    }
+}
+
+// Livox PointCloud2：帧头时间为首点时间，逐点时间相对帧头换算成 ms 存入 curvature。
+// 与 avia_handler 相同，只保留线号有效、tag 为正常/仅能量低的点
+void Preprocess::livox_pc2_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
+{
+    pl_surf.clear();
+    pl_corn.clear();
+    pl_full.clear();
+    pcl::PointCloud<livox_pc2::Point> pl_orig;
+    pcl::fromROSMsg(*msg, pl_orig);
+    const double t0 = msg->header.stamp.toSec() * 1e9;
+    int plsize = pl_orig.size();
+    pl_surf.reserve(plsize / point_filter_num + 1);
+    for (int i = 0; i < plsize; i++)
+    {
+        if (i % point_filter_num != 0) continue;
+        const livox_pc2::Point &p = pl_orig.points[i];
+        if (p.line >= N_SCANS) continue;
+        if ((p.tag & 0x30) != 0x10 && (p.tag & 0x30) != 0x00) continue;
+        if (p.x * p.x + p.y * p.y + p.z * p.z < blind * blind) continue;
+        PointType added_pt;
+        added_pt.x = p.x;
+        added_pt.y = p.y;
+        added_pt.z = p.z;
+        added_pt.intensity = p.intensity;
+        added_pt.normal_x = 0;
+        added_pt.normal_y = 0;
+        added_pt.normal_z = 0;
+        added_pt.curvature = (p.timestamp - t0) / 1e6;
         pl_surf.points.push_back(added_pt);
     }
 }
