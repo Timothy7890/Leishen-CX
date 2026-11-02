@@ -1,0 +1,17 @@
+<launch>
+  <!-- FDILink AHRS IMU 驱动。/dev/imu 由 udev 规则 99-imu.rules 固定映射（CP2102），权限 0666，无需 sudo -->
+  <node pkg="fdilink_ahrs" name="ahrs_driver" type="ahrs_driver" output="screen">
+    <param name="debug" value="false"/>
+    <param name="port" value="/dev/imu"/>
+    <param name="baud" value="921600"/>
+    <param name="imu_topic" value="imu"/>
+    <param name="imu_frame" value="gyro_link"/>
+    <param name="mag_pose_2d_topic" value="/mag_pose_2d"/>
+    <param name="Euler_angles_pub_" value="/euler_angles"/>
+    <param name="Magnetic_pub_" value="/magnetic"/>
+    <param name="gps_topic_" value="/gps/fix"/>
+    <param name="twist_topic_" value="/system_speed"/>
+    <param name="NED_odom_topic_" value="/NED_odometry"/>
+    <param name="device_type" value="1"/>  <!-- 0: origin_data, 1: for single imu or ucar in ROS -->
+  </node>
+</launch>

@@ -1,0 +1,35 @@
+# catkin 编译产物（scripts/build.sh 生成）
+catkin_ws/build/
+catkin_ws/devel/
+catkin_ws/install/
+catkin_ws/build.log
+catkin_ws/.catkin_workspace
+# 指向 /opt/ros/noetic 的符号链接，catkin_make 自动创建
+catkin_ws/src/CMakeLists.txt
+
+# FAST-LIO 运行时输出（地图由 record.sh 移到数据目录）
+catkin_ws/src/FAST_LIO/PCD/*
+catkin_ws/src/FAST_LIO/Log/*
+!catkin_ws/src/FAST_LIO/PCD/.gitkeep
+!catkin_ws/src/FAST_LIO/Log/.gitkeep
+
+# 数据文件
+*.bag
+*.pcd
+
+# 运行时状态
+run/
+
+# 前端依赖与构建产物（npm install / npm run build 生成）
+web/frontend/node_modules/
+web/dist/
+
+# Python
+__pycache__/
+*.pyc
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+.DS_Store
