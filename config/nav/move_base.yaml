@@ -30,6 +30,13 @@ local_costmap:
   plugins:
     - {name: static_layer,    type: "costmap_2d::StaticLayer"}
     - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+  # 局部代价地图把未知区域当可通行：DWA 检查车身轮廓时碰到未知格会判所有轨迹无效、车原地不动，
+  # 而 Mid-360 地图的可通行区域只有走过的路线两侧约 0.45 m（近处看不到地面），车角常伸进未知区域。
+  # 全局规划仍只走已知可通行区域（allow_unknown: false），实时防撞由 safety_gate 负责
+  static_layer:
+    map_topic: /map
+    subscribe_to_updates: false
+    track_unknown_space: false
 
 GlobalPlanner:
   use_dijkstra: true
