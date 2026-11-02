@@ -5,7 +5,8 @@
 
 输出目录中需已有离线 FAST-LIO 位姿 odom.bag（make_mature.sh 生成）。输出:
     map_dense.pcd   5 cm 体素的高密度地图（逐点去畸变）
-    grid.pgm/.yaml  2D 占据栅格（map_server 格式，供 move_base）
+    grid.pgm/.yaml  2D 占据栅格（map_server 格式，供 move_base）。可通行 = 激光束穿过的空间（射线法）
+                    + 看到的地面 + 走过的路线，再扣掉障碍
     grid.png        网页显示用（RGBA）
     reloc.npz       ICP 用的降采样点 + 法线（粗 0.3 m / 细 0.08 m）
     traj.csv        建图轨迹 t,x,y,z,yaw（地图坐标系）
@@ -26,7 +27,7 @@ import rosbag
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation, Slerp
 
-from vehicle import FLOOR_Z, HALF_WID, LIDAR_TOPIC, SENSOR, base_xy, inside_body, lidar_to_body
+from vehicle import FLOOR_Z, HALF_WID, LIDAR_TOPIC, SENSOR, T, base_xy, inside_body, lidar_to_body
 
 VOXEL = 0.05                # 高密度地图体素 (m)
 GRID_RES = 0.05             # 2D 栅格分辨率 (m)
@@ -38,6 +39,12 @@ SPECKLE_CELLS = 3           # 小于该面积（格）的孤立障碍视为噪�
 # 车体几何中心（base_link）走过的路线两侧该半径内清除障碍：车开过的地方必然可通行（取车半宽）
 SWEPT_CLEAR_R = HALF_WID
 OFF = 1 << 20               # 体素索引偏移，便于编码成一个 int64
+# 射线法：雷达到打中点之间（障碍高度区间内的那一段）是空的。Mid-360 平放时近处看不到地面，
+# 只靠"看到地面"判可通行会只剩走过的一条窄带。比光束低的矮物会被穿过，但这类东西雷达本来也看不到
+RAY_SCAN_STEP = 2           # 每 2 帧取 1 帧
+RAY_PTS = 1000              # 每帧随机取的激光束数
+RAY_STOP = 0.15             # 打中点前该距离内不标记（点本身的误差）
+FREE_MIN_RAYS = 3           # 至少被这么多束激光穿过才算可通行
 
 
 def log(msg):
@@ -73,11 +80,12 @@ def merge(keys, counts, new_keys):
     return uk, np.bincount(inv, weights=allc).astype(np.int64)
 
 
-def build_dense(bag_path, ot, op, orot):
+def read_scans(bag_path, ot, op, orot, step=1):
+    """逐帧给出 (地图系点坐标, 地图系雷达位置)：逐点按扫描时刻插值位姿（去畸变），去掉车身和位姿范围外的点。"""
     slerp = Slerp(ot, orot)
-    keys, counts = np.empty(0, np.int64), np.empty(0, np.int64)
-    batch, n_scan = [], 0
-    for _, msg, _ in rosbag.Bag(bag_path).read_messages(topics=[LIDAR_TOPIC]):
+    for k, (_, msg, _) in enumerate(rosbag.Bag(bag_path).read_messages(topics=[LIDAR_TOPIC])):
+        if k % step:
+            continue
         off = {f.name: f.offset for f in msg.fields}
         # 逐点时间：镭神 time 为相对帧头的秒（float32），Livox timestamp 为绝对时间 ns（float64）
         livox = "timestamp" in off
@@ -91,15 +99,19 @@ def build_dense(bag_path, ot, op, orot):
         b = lidar_to_body(xyz[ok])
         t = pts["t"][ok].astype(np.float64)
         ta = t * 1e-9 if livox else msg.header.stamp.to_sec() + t
-        # 去掉车身轮廓内的点（车尾部件）和位姿范围外的点
         keep = (ta >= ot[0]) & (ta <= ot[-1]) & ~inside_body(b[:, 0], b[:, 1])
         if keep.sum() < 100:
             continue
         b, ta = b[keep], ta[keep]
-        # 逐点按扫描时刻插值位姿（去畸变）
         R = slerp(ta)
         trans = np.stack([np.interp(ta, ot, op[:, i]) for i in range(3)], 1)
-        w = R.apply(b) + trans
+        yield R.apply(b) + trans, R.apply(np.broadcast_to(T, b.shape)) + trans
+
+
+def build_dense(bag_path, ot, op, orot):
+    keys, counts = np.empty(0, np.int64), np.empty(0, np.int64)
+    batch, n_scan = [], 0
+    for w, _ in read_scans(bag_path, ot, op, orot):
         iv = np.floor(w / VOXEL).astype(np.int64)
         batch.append(np.unique(encode(iv[:, 0], iv[:, 1], iv[:, 2])))
         n_scan += 1
@@ -133,11 +145,53 @@ def estimate_floor(xyz, traj_xyz):
     return float((edges[i] + edges[i + 1]) / 2)
 
 
-def build_grid(xyz, hits, floor, base_path):
-    """base_path: 车体几何中心（base_link）走过的 xy 路线。"""
+def grid_geometry(xyz):
     x0, y0 = xyz[:, 0].min() - 1.0, xyz[:, 1].min() - 1.0
     W = int(np.ceil((xyz[:, 0].max() + 1.0 - x0) / GRID_RES))
     H = int(np.ceil((xyz[:, 1].max() + 1.0 - y0) / GRID_RES))
+    return x0, y0, W, H
+
+
+def build_ray_free(bag_path, ot, op, orot, floor, geo):
+    """射线法：统计每个栅格被多少束激光（障碍高度区间内的一段）穿过。"""
+    x0, y0, W, H = geo
+    zl, zh = floor + OBST_LOW, floor + OBST_HIGH
+    cnt = np.zeros(H * W, np.int64)
+    rng = np.random.default_rng(0)
+    for w, s in read_scans(bag_path, ot, op, orot, RAY_SCAN_STEP):
+        if len(w) > RAY_PTS:
+            i = rng.choice(len(w), RAY_PTS, replace=False)
+            w, s = w[i], s[i]
+        d = w - s
+        lxy = np.hypot(d[:, 0], d[:, 1])
+        # 光束上 z 落在 [zl, zh] 的参数区间 [lo, hi]（0 = 雷达，1 = 打中点）
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u1, u2 = (zl - s[:, 2]) / d[:, 2], (zh - s[:, 2]) / d[:, 2]
+        flat = np.abs(d[:, 2]) < 1e-9
+        inside = (s[:, 2] >= zl) & (s[:, 2] <= zh)
+        lo = np.where(flat, np.where(inside, 0.0, 1.0), np.clip(np.minimum(u1, u2), 0, 1))
+        hi = np.where(flat, np.where(inside, 1.0, 0.0), np.clip(np.maximum(u1, u2), 0, 1))
+        hi = np.minimum(hi, 1 - RAY_STOP / np.maximum(lxy, 1e-6))
+        ok = (hi > lo) & (lxy > RAY_STOP)
+        if not ok.any():
+            continue
+        s, d, lo, hi = s[ok], d[ok], lo[ok], hi[ok]
+        n = np.ceil((hi - lo) * lxy[ok] / GRID_RES).astype(np.int64) + 1
+        ray = np.repeat(np.arange(len(n)), n)
+        k = np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+        u = lo[ray] + (hi - lo)[ray] * k / np.maximum(n[ray] - 1, 1)
+        cx = ((s[ray, 0] + u * d[ray, 0] - x0) / GRID_RES).astype(np.int64)
+        cy = ((s[ray, 1] + u * d[ray, 1] - y0) / GRID_RES).astype(np.int64)
+        m = (cx >= 0) & (cx < W) & (cy >= 0) & (cy < H)
+        # 同一束光多次落在同一格只算一次
+        cell = np.unique(ray[m] * (H * W) + cy[m] * W + cx[m]) % (H * W)
+        cnt += np.bincount(cell, minlength=H * W)
+    return cnt.reshape(H, W)
+
+
+def build_grid(xyz, hits, floor, base_path, geo, rays):
+    """base_path: 车体几何中心（base_link）走过的 xy 路线；rays: 每格被激光穿过的次数。"""
+    x0, y0, W, H = geo
     ix = ((xyz[:, 0] - x0) / GRID_RES).astype(int)
     iy = ((xyz[:, 1] - y0) / GRID_RES).astype(int)
     h = xyz[:, 2] - floor
@@ -163,8 +217,9 @@ def build_grid(xyz, hits, floor, base_path):
     swept_clear = cv2.dilate(line, disk(SWEPT_CLEAR_R)).astype(bool)
     occupied = occupied.astype(bool) & ~swept_clear
 
-    # 地面点稀疏处补齐（雷达线间空隙），加上车身扫过的范围，再扣掉障碍
+    # 地面点稀疏处补齐（雷达线间空隙），加上激光穿过的空间和车身扫过的范围，再扣掉障碍
     free = cv2.morphologyEx(ground, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)).astype(bool)
+    free |= rays >= FREE_MIN_RAYS
     free |= cv2.dilate(line, disk(SWEPT_CLEAR_R + 0.15)).astype(bool)
     free &= ~occupied
 
@@ -207,8 +262,13 @@ def main():
     floor = float(np.median(op[:, 2]) + FLOOR_Z) if FLOOR_Z is not None else estimate_floor(xyz, op)
     log(f"地面高度 z = {floor:.3f}（车体坐标原点在地面以上 {np.median(op[:, 2]) - floor:.2f} m）")
 
+    log("射线法统计可通行区域")
+    geo = grid_geometry(xyz)
+    rays = build_ray_free(os.path.join(session, "raw.bag"), ot, op, orot, floor, geo)
+
     log("生成 2D 栅格")
-    img, origin, n_occ, n_free = build_grid(xyz, hits, floor, np.stack(base_xy(op[:, 0], op[:, 1], yaw), 1))
+    img, origin, n_occ, n_free = build_grid(xyz, hits, floor, np.stack(base_xy(op[:, 0], op[:, 1], yaw), 1),
+                                            geo, rays)
     cv2.imwrite(os.path.join(nav, "grid.pgm"), img)
     with open(os.path.join(nav, "grid.yaml"), "w") as f:
         f.write(f"image: grid.pgm\nresolution: {GRID_RES}\norigin: [{origin[0]:.3f}, {origin[1]:.3f}, 0.0]\n"
