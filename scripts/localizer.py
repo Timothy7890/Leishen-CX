@@ -176,6 +176,10 @@ class Localizer:
             self.pending.append((t_end, drop_self(xyz)))
 
     def on_request(self, msg):
+        # 重定位进行中（或已有待处理请求）时直接忽略，不排队
+        if self.busy or self.requests:
+            rospy.loginfo("reloc request ignored: relocalization in progress")
+            return
         try:
             self.requests.append(json.loads(msg.data))
         except ValueError:
@@ -307,11 +311,18 @@ class Localizer:
         last_track = 0.0
         rate = rospy.Rate(10)
         while not rospy.is_shutdown():
+            req = None
             if self.requests:
-                self.relocalize(self.requests.popleft())
-                auto_done = True
+                req = self.requests[0]
             elif not auto_done and time.time() - start > 3 and len(self.scans) >= RELOC_SCANS:
-                self.relocalize({"mode": "auto"})
+                req = {"mode": "auto"}
+            if req is not None:
+                self.busy = True
+                try:
+                    self.relocalize(req)
+                finally:
+                    self.requests.clear()
+                    self.busy = False
                 auto_done = True
             elif self.state in ("localized", "lost") and time.time() - last_track > TRACK_PERIOD:
                 last_track = time.time()

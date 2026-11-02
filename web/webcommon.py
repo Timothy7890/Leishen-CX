@@ -49,6 +49,30 @@ def read_json(path, default=None):
         return default
 
 
+def mature_running(d):
+    """是否有 make_mature.sh 正在处理该录制目录。"""
+    for cmd in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            args = cmd.read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if any(a.endswith(b"make_mature.sh") for a in args) and str(d).encode() in args:
+            return True
+    return False
+
+
+def mature_info(d):
+    """录制目录的成熟地图状态：已有地图（nav/meta.json）+ 最近一次生成的进度。"""
+    meta = read_json(d / "nav/meta.json")
+    # 旧版 make_mature.sh 把进度写在 nav/progress.json
+    progress = read_json(d / "mature_progress.json") or read_json(d / "nav/progress.json")
+    if not meta and not progress:
+        return None
+    if progress and progress.get("status") == "running" and not mature_running(d):
+        progress = {**progress, "status": "failed", "step": "上次生成被中断（如断电），请重新生成"}
+    return {"map": meta, "progress": progress}
+
+
 class BaseHandler(BaseHTTPRequestHandler):
     index_page = "index.html"
 

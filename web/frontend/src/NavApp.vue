@@ -22,6 +22,10 @@ const gate = computed(() => state.value?.gate || {})
 const serial = computed(() => state.value?.serial || {})
 const estop = computed(() => !!state.value?.estop)
 const localized = computed(() => loc.value.state === 'localized')
+// 重定位中：点击后到定位模块进入 relocalizing 之前也算，期间两个重定位按钮都不可用
+const relocSent = ref(false)
+const relocBusy = computed(() => relocSent.value || loc.value.state === 'relocalizing')
+watch(() => loc.value.state, s => { if (s === 'relocalizing') relocSent.value = false })
 
 const LOC_LABEL = { unlocalized: '未定位', relocalizing: '重定位中…', localized: '已定位', lost: '定位丢失' }
 const GOAL_LABEL = { idle: '无目标', pending: '等待执行', active: '前往目标中', succeeded: '已到达',
@@ -62,7 +66,16 @@ async function act(fn, pending) {
 
 const start = () => act(() => navStart(selected.value, dryRun.value), '正在启动导航（约 20 秒）…')
 const stop = () => confirm('停止导航？') && act(navStop, '正在停止…')
-const autoReloc = () => act(() => navCmd('reloc', { mode: 'auto' }), '')
+async function reloc(body) {
+  if (relocBusy.value) return
+  relocSent.value = true
+  const r = await act(() => navCmd('reloc', body), '')
+  // 请求被拒绝，或 3 s 内定位模块没有开始，则恢复按钮
+  if (!r.ok) relocSent.value = false
+  else setTimeout(() => (relocSent.value = false), 3000)
+}
+
+const autoReloc = () => reloc({ mode: 'auto' })
 const cancelGoal = () => act(() => navCmd('cancel'), '')
 const toggleEstop = () => act(() => navCmd('estop', { on: !estop.value }), '')
 const setSpeed = () => act(() => navCmd('speed', { v: speed.value }), '')
@@ -70,7 +83,7 @@ const setSpeed = () => act(() => navCmd('speed', { v: speed.value }), '')
 async function onPick(p) {
   const m = mode.value
   mode.value = 'view'
-  if (m === 'reloc') await act(() => navCmd('reloc', { mode: 'manual', ...p }), '')
+  if (m === 'reloc') await reloc({ mode: 'manual', ...p })
   else if (m === 'goal') await act(() => navCmd('goal', p), '')
 }
 
@@ -139,8 +152,9 @@ onUnmounted(() => {
           <div v-if="loc.fitness != null" class="muted small num">匹配度 {{ loc.fitness }} · 误差 {{ loc.rmse }} m</div>
           <div class="muted small num">位置 {{ fmtPose(state?.pose) }}</div>
           <div class="btns">
-            <button :disabled="loc.state === 'relocalizing'" @click="autoReloc">自动重定位</button>
-            <button :class="{ active: mode === 'reloc' }" @click="mode = mode === 'reloc' ? 'view' : 'reloc'">手动点选</button>
+            <button :disabled="relocBusy" @click="autoReloc">{{ relocBusy ? '重定位中…' : '自动重定位' }}</button>
+            <button :disabled="relocBusy" :class="{ active: mode === 'reloc' }"
+                    @click="mode = mode === 'reloc' ? 'view' : 'reloc'">手动点选</button>
           </div>
         </div>
 

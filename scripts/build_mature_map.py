@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """由 raw.bag + 离线 FAST-LIO 位姿（nav/odom.bag）生成成熟地图。
 
-用法: build_mature_map.py <录制目录> <地图名称>
+用法: build_mature_map.py <录制目录> <地图名称> [输出目录，默认 <录制目录>/nav]
 
-输出（<录制目录>/nav/）:
+输出目录中需已有离线 FAST-LIO 位姿 odom.bag（make_mature.sh 生成）。输出:
     map_dense.pcd   5 cm 体素的高密度地图（逐点去畸变）
     grid.pgm/.yaml  2D 占据栅格（map_server 格式，供 move_base）
     grid.png        网页显示用（RGBA）
@@ -184,7 +184,7 @@ def build_reloc(xyz, out):
 
 def main():
     session, name = sys.argv[1], sys.argv[2]
-    nav = os.path.join(session, "nav")
+    nav = sys.argv[3] if len(sys.argv) > 3 else os.path.join(session, "nav")
     ot, op, orot = load_odom(os.path.join(nav, "odom.bag"))
     if len(ot) < 20:
         raise SystemExit("FAST-LIO 位姿太少，回放可能失败")

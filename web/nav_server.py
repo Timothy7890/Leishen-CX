@@ -30,11 +30,12 @@ last_error = {"msg": ""}
 
 
 def list_maps():
+    # nav/ 只在生成成功后整体替换（make_mature.sh），有 meta.json 即可用
     maps = []
     if DATA_ROOT.is_dir():
         for d in sorted(DATA_ROOT.iterdir(), reverse=True):
             meta = read_json(d / "nav/meta.json")
-            if meta and (read_json(d / "nav/progress.json") or {}).get("status") == "done":
+            if meta:
                 maps.append(meta)
     return maps
 

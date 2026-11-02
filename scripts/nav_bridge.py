@@ -239,8 +239,11 @@ class Handler(BaseHTTPRequestHandler):
                 bridge.pub_hb.publish(Float64(time.time()))
                 return self._json(200, {"ok": True})
             if p == "/reloc":
-                bridge.pub_reloc.publish(String(json.dumps(body)))
-                ok, msg = True, "已开始重定位"
+                if bridge.loc.get("state") == "relocalizing":
+                    ok, msg = False, "重定位进行中，已忽略本次请求"
+                else:
+                    bridge.pub_reloc.publish(String(json.dumps(body)))
+                    ok, msg = True, "已开始重定位"
             elif p == "/goal":
                 ok, msg = bridge.send_goal(float(body["x"]), float(body["y"]), float(body["yaw"]))
             elif p == "/cancel":

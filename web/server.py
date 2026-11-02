@@ -8,13 +8,15 @@
     POST /api/stop     停止录制（后台执行，状态变为 stopping）
     POST /api/mature   {"session", "name"} 把一次录制处理成成熟地图（后台执行 scripts/make_mature.sh）
 """
+import json
 import os
 import subprocess
 import threading
+import time
 from http.server import ThreadingHTTPServer
 
-from webcommon import (DATA_ROOT, PROJECT_DIR, BaseHandler, last_line, parse_kv, read_json, run_script,
-                       session_dir)
+from webcommon import (DATA_ROOT, PROJECT_DIR, BaseHandler, last_line, mature_info, mature_running, parse_kv,
+                       run_script, session_dir)
 
 PORT = int(os.environ.get("RECORD_WEB_PORT", "7010"))
 RECORD_SH = PROJECT_DIR / "record.sh"
@@ -22,6 +24,7 @@ MAKE_MATURE = PROJECT_DIR / "scripts/make_mature.sh"
 LIVE_URL = "http://127.0.0.1:7012/stream"
 
 busy = threading.Lock()   # 同一时间只允许一个 start/stop
+mature_lock = threading.Lock()
 last_error = {"msg": ""}
 
 
@@ -42,7 +45,7 @@ def list_sessions(limit=30):
             "map_points": info.get("map_points"),
             "error": info.get("error"),
             "has_bag": (d / "raw.bag").exists(),
-            "mature": read_json(d / "nav/progress.json"),
+            "mature": mature_info(d),
         })
     return sessions
 
@@ -71,14 +74,23 @@ def start_mature(body):
         return 400, "录制不存在或缺少 raw.bag"
     if not name:
         return 400, "请填写地图名称"
-    if (read_json(d / "nav/progress.json") or {}).get("status") == "running":
-        return 409, "这次录制正在生成成熟地图"
-    if any((read_json(s / "nav/progress.json") or {}).get("status") == "running" for s in DATA_ROOT.iterdir()):
-        return 409, "另一张成熟地图正在生成，请稍后"
-    log = open(PROJECT_DIR / "run" / f"mature_{d.name}.log", "w")
-    subprocess.Popen([str(MAKE_MATURE), str(d), name], stdout=log, stderr=subprocess.STDOUT,
-                     stdin=subprocess.DEVNULL, start_new_session=True)
-    return 202, "开始生成成熟地图（约为录制时长的 1~1.5 倍）"
+    with mature_lock:
+        # 以进程是否存在为准（进度文件可能还没写出来）
+        if any(mature_running(s) for s in DATA_ROOT.iterdir() if s.is_dir()):
+            return 409, "已有成熟地图正在生成，请稍后"
+        # 启动前先写进度，页面立即显示"生成中"
+        with open(d / "mature_progress.json", "w") as f:
+            json.dump({"status": "running", "step": "准备中", "name": name, "updated": int(time.time())},
+                      f, ensure_ascii=False)
+        log = open(PROJECT_DIR / "run" / f"mature_{d.name}.log", "w")
+        subprocess.Popen([str(MAKE_MATURE), str(d), name], stdout=log, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+        # 等脚本进程出现，后续请求的进程检查才可靠
+        for _ in range(20):
+            if mature_running(d):
+                break
+            time.sleep(0.1)
+    return 202, "开始生成成熟地图（约为录制时长的 1~1.5 倍），完成前原有地图照常可用"
 
 
 class Handler(BaseHandler):
