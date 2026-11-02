@@ -1,0 +1,15 @@
+# 全局 / 局部代价地图共用参数（加载到 global_costmap 和 local_costmap 命名空间）
+# 车身 1.0 x 0.8 m，与原 racebot 配置及 scripts/safety_gate.py 一致
+footprint: [[0.5, 0.4], [0.5, -0.4], [-0.5, -0.4], [-0.5, 0.4]]
+robot_base_frame: base_link
+global_frame: map
+transform_tolerance: 0.5
+
+static_layer:
+  map_topic: /map
+  subscribe_to_updates: false
+  track_unknown_space: true
+
+inflation_layer:
+  inflation_radius: 0.6       # 离墙 0.6 m 内代价升高，路径尽量走中间
+  cost_scaling_factor: 5.0

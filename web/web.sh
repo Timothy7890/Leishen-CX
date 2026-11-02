@@ -1,32 +1,41 @@
 #!/usr/bin/env bash
-# 7010 录制控制网页服务
+# 网页服务：7010 录制（server.py）+ 7011 导航（nav_server.py）
 # 用法: web/web.sh start | stop | restart | status | autostart
 WEB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 RUN_DIR=$WEB_DIR/../run
-PID_FILE=$RUN_DIR/web.pid
-LOG_FILE=$RUN_DIR/web.log
-PORT=${RECORD_WEB_PORT:-7010}
 mkdir -p "$RUN_DIR"
 
-running() { [[ -f $PID_FILE ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; }
+# 名称 脚本 端口
+SERVERS=("web server.py 7010" "nav_web nav_server.py 7011")
+
+running() { [[ -f $RUN_DIR/$1.pid ]] && kill -0 "$(cat "$RUN_DIR/$1.pid")" 2> /dev/null; }
+
+start_one() {
+    local name=$1 script=$2 port=$3
+    if running "$name"; then echo "$script 已在运行，端口 $port"; return 0; fi
+    setsid /usr/bin/python3 "$WEB_DIR/$script" >> "$RUN_DIR/$name.log" 2>&1 < /dev/null &
+    echo $! > "$RUN_DIR/$name.pid"
+    sleep 1
+    if running "$name"; then echo "$script 已启动，端口 $port"; else echo "$script 启动失败，见 run/$name.log"; return 1; fi
+}
+
+stop_one() {
+    local name=$1 script=$2
+    running "$name" && kill "$(cat "$RUN_DIR/$name.pid")" && echo "$script 已停止"
+    rm -f "$RUN_DIR/$name.pid"
+}
+
+each() { local fn=$1 s; for s in "${SERVERS[@]}"; do $fn $s; done; }
 
 case ${1:-} in
-    start)
-        if running; then echo "已在运行 (pid $(cat "$PID_FILE"))，端口 $PORT"; exit 0; fi
-        setsid /usr/bin/python3 "$WEB_DIR/server.py" >> "$LOG_FILE" 2>&1 < /dev/null &
-        echo $! > "$PID_FILE"
-        sleep 1
-        if running; then echo "已启动，端口 $PORT"; else echo "启动失败，见 $LOG_FILE"; exit 1; fi
-        ;;
-    stop)
-        running && kill "$(cat "$PID_FILE")" && echo "已停止"
-        rm -f "$PID_FILE"
-        ;;
-    restart)
-        "$0" stop; "$0" start
-        ;;
+    start)   each start_one ;;
+    stop)    each stop_one ;;
+    restart) each stop_one; each start_one ;;
     status)
-        if running; then echo "运行中 (pid $(cat "$PID_FILE"))，端口 $PORT"; else echo "未运行"; fi
+        for s in "${SERVERS[@]}"; do
+            set -- $s
+            if running "$1"; then echo "$2 运行中 (pid $(cat "$RUN_DIR/$1.pid"))，端口 $3"; else echo "$2 未运行"; fi
+        done
         ;;
     autostart)
         # 写入 crontab @reboot（不需要 sudo），重复执行不会重复添加

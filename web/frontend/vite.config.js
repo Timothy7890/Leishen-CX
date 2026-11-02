@@ -1,12 +1,22 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { resolve } from 'node:path'
 
-// 构建产物输出到 web/dist，由 web/server.py 提供
-// 本地开发：VITE_API=http://localhost:7010 npm run dev
+// 构建产物输出到 web/dist：index.html（7010 录制）、nav.html（7011 导航）
+// 本地开发：VITE_API=http://localhost:7010 npm run dev（导航页面改为 7011）
 export default defineConfig({
   plugins: [vue()],
   base: './',
-  build: { outDir: '../dist', emptyOutDir: true },
+  build: {
+    outDir: '../dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        index: resolve(__dirname, 'index.html'),
+        nav: resolve(__dirname, 'nav.html'),
+      },
+    },
+  },
   server: {
     host: true,
     proxy: { '/api': process.env.VITE_API || 'http://localhost:7010' },

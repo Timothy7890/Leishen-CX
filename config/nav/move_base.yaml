@@ -1,0 +1,66 @@
+# move_base 参数。障碍物不进代价地图：动态障碍由 safety_gate.py 处理（停车等待，不绕行）
+
+base_global_planner: global_planner/GlobalPlanner
+base_local_planner: dwa_local_planner/DWAPlannerROS
+
+controller_frequency: 10.0
+planner_frequency: 0.5          # 每 2 s 重新规划一次全局路径
+controller_patience: 30.0
+planner_patience: 10.0
+oscillation_timeout: 0.0        # 停车等待障碍时不判为震荡
+recovery_behavior_enabled: false
+clearing_rotation_allowed: false
+shutdown_costmaps: false
+
+global_costmap:
+  update_frequency: 1.0
+  publish_frequency: 0.5
+  rolling_window: false
+  plugins:
+    - {name: static_layer,    type: "costmap_2d::StaticLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+
+local_costmap:
+  update_frequency: 5.0
+  publish_frequency: 2.0
+  rolling_window: true
+  width: 6.0
+  height: 6.0
+  resolution: 0.05
+  plugins:
+    - {name: static_layer,    type: "costmap_2d::StaticLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
+
+GlobalPlanner:
+  use_dijkstra: true
+  allow_unknown: false          # 只走建图时确认过的可通行区域
+  default_tolerance: 0.3        # 目标点在障碍内时，允许落到 0.3 m 内的可通行处
+  cost_factor: 0.55
+  neutral_cost: 66
+  lethal_cost: 253
+
+DWAPlannerROS:
+  # 速度上限由网页设置（nav_bridge 通过 dynamic_reconfigure 修改），safety_gate 再限一次
+  max_vel_x: 0.3
+  min_vel_x: 0.0                # 不倒车
+  max_vel_y: 0.0
+  min_vel_y: 0.0
+  max_vel_trans: 0.3
+  min_vel_trans: 0.05
+  max_vel_theta: 0.6
+  min_vel_theta: 0.2
+  acc_lim_x: 0.8
+  acc_lim_y: 0.0
+  acc_lim_theta: 1.5
+  xy_goal_tolerance: 0.15
+  yaw_goal_tolerance: 0.15
+  latch_xy_goal_tolerance: true
+  sim_time: 2.0
+  vx_samples: 8
+  vth_samples: 20
+  path_distance_bias: 32.0
+  goal_distance_bias: 20.0
+  occdist_scale: 0.02
+  forward_point_distance: 0.4
+  oscillation_reset_dist: 0.05
+  holonomic_robot: false

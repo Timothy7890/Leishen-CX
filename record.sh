@@ -118,7 +118,7 @@ cmd_start() {
 
     SESSION="$DATA_ROOT/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$SESSION/logs" "$SESSION/config"
-    cp "$PROJECT_DIR"/config/* "$SESSION/config/"
+    cp "$PROJECT_DIR"/config/*.launch "$PROJECT_DIR"/config/*.yaml "$SESSION/config/"
     export ROS_LOG_DIR="$SESSION/logs/ros"
     rm -f "$PID_FILE" "$STATE_FILE" "$FASTLIO_PCD"
 

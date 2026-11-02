@@ -4,7 +4,7 @@
 订阅雷达原始点云 /velodyne_points 和 FAST-LIO 的 /Odometry，用最新位姿把原始点云
 变换到世界坐标系（FAST-LIO 的 /cloud_registered 是 0.5 m 降采样后的，显示太稀疏），
 累积到 5 cm 的二维栅格（每格保存最高点高度），
-通过 http://127.0.0.1:7011/stream 以 SSE 推送给 web/server.py：
+通过 http://127.0.0.1:7012/stream 以 SSE 推送给 web/server.py（7011 留给导航页面）：
 
     event: snapshot  {"cell", "cells": b64(int16 ix,iy,zcm)*, "traj": [[x,y],...], "pose"}
     event: frame     {"d": b64(新增/升高的格子 int16 ix,iy,zcm), "s": b64(当前帧格子 int16 ix,iy), "p": [x,y,yaw]}
@@ -34,7 +34,7 @@ Z_STEP_CM = 5               # 高度至少升高 5 cm 才推送更新
 SCAN_MAX = 6000             # 每帧推送的当前扫描格子上限
 BLIND = 0.5                 # 与 FAST-LIO blind 一致，去掉车身附近的点 (m)
 LIDAR_TO_IMU = np.array([0.0, 0.0, 0.28])   # 与 fastlio_360.yaml extrinsic_T 一致（R 为单位阵）
-PORT = 7011
+PORT = 7012
 
 lock = threading.Lock()
 tiles = {}                  # (tx, ty) -> int16[TILE, TILE]，高度 cm

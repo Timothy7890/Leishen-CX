@@ -1,6 +1,9 @@
 # Leishen-CX
 
-镭神 CX 32 线激光雷达 + FDILink IMU 的 **360° 录制与 FAST-LIO 实时建图**，独立于 `~/workspace` 下的原有工程。
+镭神 CX 32 线激光雷达 + FDILink IMU 的 **360° 录制、FAST-LIO 建图与地图内导航**，独立于 `~/workspace` 下的原有工程。
+
+- `http://<车IP>:7010` 录制：开始/停止录制、实时地图、把录制设为成熟地图
+- `http://<车IP>:7011` 导航：选择成熟地图、自动/手动重定位、点选目标、急停
 
 ## 快速使用
 
@@ -34,25 +37,77 @@ cd ~/yx/project/Leishen-CX
 | `config/` | 本次使用的配置快照 |
 | `logs/` | 各节点日志 |
 | `info.txt` | 起止时间、时长、包大小、地图点数 |
+| `nav/` | 成熟地图（见下） |
+
+## 成熟地图
+
+在 7010 页面录制列表点"设为成熟地图"并命名（或 `scripts/make_mature.sh <录制目录> <名称>`），
+后台用当前配置离线重跑 `raw.bag`（独立 ROS master 11312，可与录制/导航同时进行），耗时约为录制时长的 1~1.5 倍。
+旧录制会顺带修正时间单位问题。输出在 `<录制目录>/nav/`：
+
+| 文件 | 内容 |
+|---|---|
+| `map_dense.pcd` | 5 cm 体素高密度地图（逐点去畸变） |
+| `grid.pgm/.yaml` | 2D 占据栅格，供路径规划；地面以上 0.15~1.6 m 的静态物体为障碍 |
+| `reloc.npz` | 重定位用的降采样点 + 法线 |
+| `traj.csv` | 建图轨迹 `t,x,y,z,yaw` |
+| `meta.json` / `progress.json` | 名称、地面高度、栅格参数 / 生成进度 |
+
+栅格去噪：只用被扫到 ≥5 次的点（排除建图时跟车的人），去掉孤立噪点，建图轨迹两侧 0.35 m 内强制可通行。
+
+## 导航（7011）
+
+```bash
+./nav.sh start ~/yx/Data/Lidar_data/<录制> [--dry-run]   # 一般直接用网页
+./nav.sh stop
+```
+
+流程：选成熟地图 → 启动导航（约 20 s）→ 自动重定位（约 10 s）→ "点选目标"：在地图上按下定位置、拖动定朝向 → 车自动前往。
+
+- **重定位**：本车无相机，沿建图轨迹每 1.5 m × 12 个朝向撒点做多起点 ICP（方法参考 D5G-beacon）。
+  有多个相似位置或匹配度不够时提示手动：点"手动点选"，在地图上点车的大概位置并拖出车头朝向。
+- **持续定位**：FAST-LIO 里程计 + 每秒一次与地图 ICP 校正；连续 5 次失败判为丢失并停车。
+- **规划**：move_base（GlobalPlanner + DWA），只在建图时确认可通行的区域内规划，不倒车。
+- **遇障停车（不绕行）**：`scripts/safety_gate.py` 检查实时雷达，前进时车头前方 0.5 m + 1 s×速度、
+  原地转向时车身外 0.25 m 内有障碍即停车，障碍消失 2 s 后自动继续。
+- **安全**：网页急停（空格键也可）；限速默认 0.3 m/s（网页可调，上限 0.6）；
+  定位丢失、网页心跳中断 5 s（关闭页面/手机息屏）、雷达中断时自动停车；底盘串口 0.5 s 无指令发零速。
+- **空跑**：勾选"空跑"则整套流程运行但不向 `/dev/car` 发送，用于检查规划路径。
+
+实车前提：小车面板切到 **ROS 控制**；`/dev/car` 需可读写（一次性执行）：
+
+```bash
+echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="car", MODE="0666"' | sudo tee /etc/udev/rules.d/99-car.rules && sudo udevadm control --reload && sudo udevadm trigger
+```
 
 ## 目录结构
 
 ```
 Leishen-CX/
 ├── record.sh                 录制控制（start / stop / status）
+├── nav.sh                    导航控制（start <录制> [--dry-run] / stop / status）
 ├── config/
 │   ├── lidar_360.launch      雷达驱动，360° 不裁剪
 │   ├── imu.launch            IMU 驱动（/dev/imu，无需 sudo）
-│   └── fastlio_360.yaml      FAST-LIO 参数
+│   ├── fastlio_360.yaml      FAST-LIO 参数
+│   └── nav/                  move_base 与代价地图参数
 ├── scripts/
 │   ├── record_tf.py          轨迹记录（camera_init -> body）
-│   ├── live_map.py           实时俯视地图推送（127.0.0.1:7011，随录制启停）
+│   ├── live_map.py           录制实时地图推送（127.0.0.1:7012）
+│   ├── make_mature.sh        成熟地图：离线重跑 FAST-LIO
+│   ├── build_mature_map.py   成熟地图：高密度地图、2D 栅格、重定位数据
+│   ├── localizer.py          重定位 + 持续定位（发布 TF map -> camera_init）
+│   ├── safety_gate.py        安全门：急停、心跳、遇障停车、限速
+│   ├── car_serial.py         /cmd_vel -> /dev/car（Modbus，协议同原 cmd_vel_to_serial.py）
+│   ├── nav_bridge.py         导航 ROS <-> 网页（127.0.0.1:7013）
 │   └── build.sh              编译 catkin_ws
 ├── web/
-│   ├── server.py             7010 端口服务：API + 静态页面 + 转发实时地图
-│   ├── web.sh                网页服务 start / stop / restart / status / autostart
-│   ├── frontend/             Vue 3 + Vite 源码
-│   └── dist/                 前端构建产物（server.py 提供）
+│   ├── server.py             7010：录制 API + 页面 + 转发实时地图
+│   ├── nav_server.py         7011：导航 API + 页面 + 转发 nav_bridge
+│   ├── webcommon.py          两个服务共用的 HTTP 工具
+│   ├── web.sh                网页服务 start / stop / restart / status / autostart（两个端口）
+│   ├── frontend/             Vue 3 + Vite 源码（index.html 录制，nav.html 导航）
+│   └── dist/                 前端构建产物
 ├── catkin_ws/src/            源码（从 ~/workspace 复制）
 │   ├── lslidar_cx_driver     镭神 CX 驱动
 │   ├── fdilink_ahrs          IMU 驱动
@@ -82,12 +137,13 @@ Leishen-CX/
 ## 网页服务
 
 ```bash
-web/web.sh start        # 启动（端口 7010）
+web/web.sh start        # 启动（端口 7010 + 7011）
 web/web.sh status
 web/web.sh autostart    # 开机自启（crontab @reboot，无需 sudo）
 ```
 
-从 Mac 通过 SSH 访问：`ssh -L 7010:localhost:7010 Wangtao-613`，然后打开 `http://localhost:7010`。
+从 Mac 通过 SSH 访问：`ssh -L 7010:localhost:7010 -L 7011:localhost:7011 Wangtao-613`，
+然后打开 `http://localhost:7010` / `http://localhost:7011`。
 
 ## 重新编译
 
@@ -110,3 +166,4 @@ npm run build                                    # 输出到 web/dist，刷新�
 |---|---|---|
 | 镭神 CX 32 线 | 网口，雷达 IP 192.168.1.200 → 本机 192.168.1.102，UDP 2368/2369 | 本机 IP 不要改 |
 | FDILink IMU | USB（CP2102）→ `/dev/imu`，921600 | udev 规则 `/etc/udev/rules.d/99-imu.rules` |
+| 小车底盘 | USB（CH340）→ `/dev/car`，115200，Modbus RTU | udev 规则 `/etc/udev/rules.d/99-car.rules`；车身 1.0 × 0.8 m |
