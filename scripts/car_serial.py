@@ -8,7 +8,8 @@ Modbus RTU 写多个寄存器（功能码 0x10），float32 字序交换（CDAB�
 
 与原脚本的区别：以 10 Hz 固定频率发送最新指令；超过 CMD_TIMEOUT 未收到指令发零速；
 退出时发零速；读取底盘应答（面板不在 ROS 控制时底盘回 01 90 08 拒绝）。空跑模式（~dry_run 或环境变量 NAV_DRY_RUN=1）不打开串口，只记录。
-状态以 JSON 发布在 /nav/serial_status。
+车头与底盘前进方向相反时（sensor.yaml chassis_reverse）线速度取反后发送，角速度不变。
+状态以 JSON 发布在 /nav/serial_status，其中速度按车头方向。
 """
 import json
 import os
@@ -19,6 +20,8 @@ import time
 import rospy
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
+
+from vehicle import CHASSIS_REVERSE
 
 PORT, BAUD = "/dev/car", 115200
 REG_LINEAR, REG_ANGULAR = 0x0154, 0x015E
@@ -116,7 +119,7 @@ class CarSerial:
                 fresh = time.time() - self.cmd_t < CMD_TIMEOUT
                 v, w = (self.v, self.w) if fresh else (0.0, 0.0)
             if self.ensure_open():
-                self.send(v, w)
+                self.send(-v if CHASSIS_REVERSE else v, w)
             if time.time() - last_pub > 0.5:
                 last_pub = time.time()
                 self.pub.publish(String(json.dumps(

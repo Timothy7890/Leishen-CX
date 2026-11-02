@@ -11,7 +11,7 @@
   4. 与次优的不同解比较，分数接近则判为有歧义，需要手动点选
 
 话题:
-  订阅 /velodyne_points /Odometry /nav/reloc_request(String JSON)
+  订阅 雷达点云（vehicle.LIDAR_TOPIC） /Odometry /nav/reloc_request(String JSON)
   发布 /nav/loc_status(String JSON, latched)  /nav/robot_pose(PoseStamped, map 系)
 """
 import os
@@ -36,7 +36,7 @@ from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
 
-from vehicle import drop_self
+from vehicle import LIDAR_TOPIC, drop_self
 
 SCAN_VOXEL = 0.1
 RELOC_SCANS = 10            # 重定位用最近 1 s 的扫描
@@ -120,7 +120,7 @@ class Localizer:
         self.vel = np.zeros(2)      # 车体系前进速度 (m/s)、偏航角速度 (rad/s)，平滑后
         self.tfb = tf2_ros.TransformBroadcaster()
         rospy.Subscriber("/Odometry", Odometry, self.on_odom, queue_size=20)
-        rospy.Subscriber("/velodyne_points", PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
+        rospy.Subscriber(LIDAR_TOPIC, PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
         rospy.Subscriber("/nav/reloc_request", String, self.on_request, queue_size=5)
         self.status(state="unlocalized", msg=f"地图已加载，{len(self.map.candidates)} 个候选位置")
 
@@ -182,7 +182,7 @@ class Localizer:
         self.tfb.sendTransform(ts)
 
     def on_cloud(self, msg):
-        # 镭神驱动：header.stamp 为扫描起始，点的 time 为 0~0.1 s；FAST-LIO 位姿时刻 = 扫描结束
+        # 镭神与 Livox 驱动 header.stamp 都为扫描起始，一帧 0.1 s；FAST-LIO 位姿时刻 = 扫描结束
         t_end = msg.header.stamp.to_sec() + 0.1
         off = {f.name: f.offset for f in msg.fields}
         dt = np.dtype({"names": ["x", "y", "z"], "formats": ["<f4"] * 3,
@@ -191,8 +191,14 @@ class Localizer:
         xyz = np.stack([p["x"], p["y"], p["z"]], 1).astype(np.float64)
         r2 = np.einsum("ij,ij->i", xyz, xyz)
         xyz = voxel_np(xyz[np.isfinite(r2) & (r2 > 0.25) & (r2 < 900)], SCAN_VOXEL)
+        xyz = drop_self(xyz)
         with self.lock:
-            self.pending.append((t_end, drop_self(xyz)))
+            # FAST-LIO 算得比这里快时（Mid-360 点少），对应位姿已经到了，直接配对
+            for stamp, T in reversed(self.odom_hist):
+                if abs(t_end - stamp) < 0.03:
+                    self.scans.append((stamp, xyz @ T[:3, :3].T + T[:3, 3]))
+                    return
+            self.pending.append((t_end, xyz))
 
     def on_request(self, msg):
         # 重定位进行中（或已有待处理请求）时直接忽略，不排队

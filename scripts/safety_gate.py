@@ -29,7 +29,7 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float32, Float64, String
 
-from vehicle import BASE_XY, FRONT, HALF_WID, SELF_MARGIN, SWEEP_R, inside_body, lidar_to_body
+from vehicle import BASE_XY, FLOOR_Z, FRONT, HALF_WID, LIDAR_TOPIC, SELF_MARGIN, SWEEP_R, inside_body, lidar_to_body
 
 # 车身轮廓来自 config/nav/costmap_common.yaml（见 scripts/vehicle.py），轮廓内的点视为车自身
 FRONT_MIN, FRONT_PER_V = 0.5, 1.0   # 前方检测距离 = 车头外 0.5 m + 1.0 s × 速度
@@ -55,7 +55,8 @@ class Gate:
         self.max_speed = float(rospy.get_param("~max_speed", 0.3))
         self.heartbeat = 0.0
         self.loc_state = "unlocalized"
-        self.floor = rospy.get_param("~floor_z", None)   # body 坐标系下的地面高度
+        # body 坐标系下的地面高度；传感器配置未给出时启动后自动标定
+        self.floor = rospy.get_param("~floor_z", FLOOR_Z)
         self.floor_samples = []
         self.front_hits = self.ring_hits = 0
         self.blocked_since = None
@@ -65,7 +66,7 @@ class Gate:
         self.pub_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
         self.pub_status = rospy.Publisher("/nav/gate_status", String, queue_size=1, latch=True)
         rospy.Subscriber("/cmd_vel_nav", Twist, self.on_cmd, queue_size=1)
-        rospy.Subscriber("/velodyne_points", PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
+        rospy.Subscriber(LIDAR_TOPIC, PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
         rospy.Subscriber("/nav/estop", Bool, lambda m: setattr(self, "estop", m.data), queue_size=1)
         rospy.Subscriber("/nav/max_speed", Float32,
                          lambda m: setattr(self, "max_speed", max(0.0, min(0.6, m.data))), queue_size=1)

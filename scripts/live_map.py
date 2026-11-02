@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """实时俯视地图推送（由 record.sh 随录制启动，录制结束即退出）。
 
-订阅雷达原始点云 /velodyne_points 和 FAST-LIO 的 /Odometry，用最新位姿把原始点云
+订阅雷达原始点云（vehicle.LIDAR_TOPIC）和 FAST-LIO 的 /Odometry，用最新位姿把原始点云
 变换到世界坐标系（FAST-LIO 的 /cloud_registered 是 0.5 m 降采样后的，显示太稀疏），
 累积到 5 cm 的二维栅格（每格保存最高点高度），
 通过 http://127.0.0.1:7012/stream 以 SSE 推送给 web/server.py（7011 留给导航页面）：
@@ -27,7 +27,7 @@ import rospy
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2
 
-from vehicle import drop_self
+from vehicle import LIDAR_TOPIC, drop_self
 
 CELL = 0.05                 # 栅格边长 (m)
 TILE = 256                  # 每个 tile 256x256 格
@@ -180,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     rospy.init_node("live_map", anonymous=False, disable_signals=False)
-    rospy.Subscriber("/velodyne_points", PointCloud2, on_cloud, queue_size=1, buff_size=2 ** 24)
+    rospy.Subscriber(LIDAR_TOPIC, PointCloud2, on_cloud, queue_size=1, buff_size=2 ** 24)
     rospy.Subscriber("/Odometry", Odometry, on_odom, queue_size=10)
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     server.daemon_threads = True

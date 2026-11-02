@@ -4,7 +4,7 @@
 #
 #  用法: scripts/make_mature.sh <录制目录> <地图名称>
 #
-#  1. 用当前配置离线回放 raw.bag 跑 FAST-LIO（独立 ROS master 11312，不影响录制/导航），
+#  1. 用录制时的传感器（<录制目录>/config/sensor，旧录制为 cx32）的当前配置离线回放 raw.bag 跑 FAST-LIO（独立 ROS master 11312，不影响录制/导航），
 #     记录位姿 -> odom.bag
 #  2. build_mature_map.py：原始点云 + 位姿 -> 高密度地图、2D 栅格、ICP 法线缓存
 #
@@ -24,6 +24,9 @@ source /opt/ros/noetic/setup.bash
 source "$PROJECT_DIR/catkin_ws/devel/setup.bash"
 export ROS_MASTER_URI=http://localhost:11312
 export PYTHONUNBUFFERED=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
+# build_mature_map.py 通过 vehicle.py 读同一个传感器配置
+export LEISHEN_SENSOR=$(cat "$SESSION/config/sensor" 2>/dev/null || echo cx32)
+sensor_vars=$(python3 "$PROJECT_DIR/scripts/vehicle.py" --shell) && eval "$sensor_vars" || exit 1
 
 progress() {
     printf '{"status": "%s", "step": "%s", "name": "%s", "updated": %s}\n' \
@@ -61,9 +64,9 @@ PIDS+=($!)
 for ((i = 0; i < 30; i++)); do rostopic list > /dev/null 2>&1 && break; sleep 0.5; done
 
 # 与录制相同的配置，但不让 FAST-LIO 自己存图（避免和正在进行的录制争用 PCD/scans.pcd）
-rosparam load "$PROJECT_DIR/config/fastlio_360.yaml"
+rosparam load "$SENSOR_DIR/fastlio.yaml"
 rosparam set /pcd_save/pcd_save_en false
-cp "$PROJECT_DIR/config/fastlio_360.yaml" "$PROJECT_DIR/config/nav/costmap_common.yaml" "$WORK/"
+cp "$SENSOR_DIR/fastlio.yaml" "$SENSOR_DIR/sensor.yaml" "$PROJECT_DIR/config/nav/costmap_common.yaml" "$WORK/"
 
 setsid rosrun fast_lio fastlio_mapping > "$WORK/logs/fastlio.log" 2>&1 < /dev/null &
 PIDS+=($!)

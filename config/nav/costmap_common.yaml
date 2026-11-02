@@ -1,12 +1,10 @@
 # 全局 / 局部代价地图共用参数（加载到 global_costmap 和 local_costmap 命名空间）
 #
-# 车身尺寸为实测（相对雷达中心）：前 +0.16 m、后 -0.68 m、左右各 0.28 m（总长 0.84 m、总宽 0.56 m）。
-# 规划参考点 base_link 取车体几何中心，即雷达后方 0.26 m：
-#   - footprint 以 base_link 为原点，前后对称 ±0.42、左右 ±0.28
-#   - base_link_in_body 为 base_link 在 body 系（雷达正下方的 IMU）中的 xy 位置，nav.sh 据此发布 TF
-# scripts/vehicle.py 也读取这两项：安全门检测区域、去除车自身点、网页画车都按这个轮廓。
+# 车身实测总长 0.84 m、总宽 0.56 m。规划参考点 base_link 取车体几何中心，
+# footprint 以 base_link 为原点，前后对称 ±0.42、左右 ±0.28，与车头朝哪边无关。
+# base_link 相对雷达的位置随传感器安装而变，见 config/sensors/<传感器>/sensor.yaml 的 base_link_in_body。
+# scripts/vehicle.py 也读取这里：安全门检测区域、去除车自身点、网页画车都按这个轮廓。
 footprint: [[0.42, 0.28], [0.42, -0.28], [-0.42, -0.28], [-0.42, 0.28]]
-base_link_in_body: [-0.26, 0.0]
 robot_base_frame: base_link
 global_frame: map
 transform_tolerance: 0.5

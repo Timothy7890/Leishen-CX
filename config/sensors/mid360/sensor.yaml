@@ -1,0 +1,16 @@
+# Livox Mid-360（网口，点云 + 内置 IMU）。字段说明见 scripts/vehicle.py
+#
+# 平放在底盘原车尾的高处，线缆口朝原车头；雷达 +x 指向原车尾，即新车头。
+# 雷达离地实测 0.67～0.68 m。竖直视场 -7°～52°：车周约 5.5 m 内看不到地面，
+# 车前 1 m 处低于约 0.55 m、2 m 处低于约 0.43 m 的障碍看不到。
+lidar_ip: 192.168.1.185
+lidar_topic: /livox/lidar
+imu_topic: /livox/imu
+launch: [lidar.launch]
+devices: []
+# 暂定：雷达中心距新车头约 0.10 m、左右居中（待实测）。车长 0.84 m，几何中心在雷达后方 0.32 m
+base_link_in_body: [-0.32, 0.0]
+# 新车头是底盘原来的车尾：线速度取反，角速度不变
+chassis_reverse: true
+# 近处看不到地面无法自动标定：雷达离地 0.675 m，body 原点（内置 IMU）在雷达下方 0.044 m
+floor_z: -0.63

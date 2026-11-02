@@ -1,0 +1,10 @@
+# 镭神 CX 32 线（网口）+ FDILink IMU（USB）。字段说明见 scripts/vehicle.py
+lidar_ip: 192.168.1.200
+lidar_topic: /velodyne_points
+imu_topic: /imu
+launch: [lidar.launch, imu.launch]
+devices: [/dev/imu]
+# 雷达装在车头附近：雷达中心距车头 0.16、车尾 0.68、左右各 0.28 m；车体几何中心在雷达后方 0.26 m
+base_link_in_body: [-0.26, 0.0]
+chassis_reverse: false
+floor_z: null

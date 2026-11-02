@@ -1,6 +1,10 @@
 # Leishen-CX
 
-镭神 CX 32 线激光雷达 + FDILink IMU 的 **360° 录制、FAST-LIO 建图与地图内导航**，独立于 `~/workspace` 下的原有工程。
+360° 激光雷达的 **录制、FAST-LIO 建图与地图内导航**，独立于 `~/workspace` 下的原有工程。
+支持两种传感器，同一份代码按配置切换（见[传感器](#传感器)）：
+
+- `cx32`：镭神 CX 32 线 + FDILink IMU（缺省）
+- `mid360`：Livox Mid-360（内置 IMU）
 
 - `http://<车IP>:7010` 录制：开始/停止录制、实时地图、把录制设为成熟地图
 - `http://<车IP>:7011` 导航：选择成熟地图、自动/手动重定位、点选目标、急停
@@ -31,10 +35,10 @@ cd ~/yx/project/Leishen-CX
 
 | 文件 | 内容 |
 |---|---|
-| `raw.bag` | 原始数据 `/velodyne_points` + `/imu`，可离线重新建图 |
+| `raw.bag` | 原始数据：雷达点云 + IMU（cx32 为 `/velodyne_points` `/imu`，mid360 为 `/livox/lidar` `/livox/imu`），可离线重新建图 |
 | `map.pcd` | FAST-LIO 建好的点云地图（世界坐标系 `camera_init`） |
 | `trajectory.csv` | 车辆轨迹 `timestamp,x,y,z,qx,qy,qz,qw`（约 10 Hz） |
-| `config/` | 本次使用的配置快照 |
+| `config/` | 本次使用的传感器配置快照；`config/sensor` 记录传感器名 |
 | `logs/` | 各节点日志 |
 | `info.txt` | 起止时间、时长、包大小、地图点数 |
 | `nav/` | 成熟地图（见下） |
@@ -42,7 +46,7 @@ cd ~/yx/project/Leishen-CX
 ## 成熟地图
 
 在 7010 页面录制列表点"设为成熟地图"并命名（或 `scripts/make_mature.sh <录制目录> <名称>`），
-后台用当前配置离线重跑 `raw.bag`（独立 ROS master 11312，可与录制/导航同时进行），耗时约为录制时长的 1~1.5 倍。
+后台按录制时的传感器、用该传感器的当前配置离线重跑 `raw.bag`（独立 ROS master 11312，可与录制/导航同时进行），耗时约为录制时长的 1~1.5 倍。
 旧录制会顺带修正时间单位问题。已有成熟地图的录制可点"重新生成"（需确认）：新图先生成到 `nav.tmp/`，
 成功后才替换 `nav/`，生成期间和失败时原地图照常可用；进度在 `<录制目录>/mature_progress.json`。输出在 `<录制目录>/nav/`：
 
@@ -53,7 +57,7 @@ cd ~/yx/project/Leishen-CX
 | `reloc.npz` | 重定位用的降采样点 + 法线 |
 | `traj.csv` | 建图轨迹 `t,x,y,z,yaw` |
 | `meta.json` | 名称、地面高度、栅格参数 |
-| `fastlio_360.yaml` / `costmap_common.yaml` | 生成时使用的配置快照 |
+| `fastlio.yaml` / `sensor.yaml` / `costmap_common.yaml` | 生成时使用的配置快照 |
 
 栅格去噪：只用被扫到 ≥5 次的点（排除建图时跟车的人），去掉孤立噪点，建图轨迹两侧 0.35 m 内强制可通行。
 
@@ -91,10 +95,10 @@ Leishen-CX/
 ├── record.sh                 录制控制（start / stop / status）
 ├── nav.sh                    导航控制（start <录制> [--dry-run] / stop / status）
 ├── config/
-│   ├── lidar_360.launch      雷达驱动，360° 不裁剪
-│   ├── imu.launch            IMU 驱动（/dev/imu，无需 sudo）
-│   ├── fastlio_360.yaml      FAST-LIO 参数
-│   └── nav/                  move_base 与代价地图参数
+│   ├── sensor                本车当前传感器（cx32 / mid360，不提交，缺省 cx32）
+│   ├── sensors/cx32/         镭神：lidar.launch（360° 不裁剪）、imu.launch、fastlio.yaml、sensor.yaml
+│   ├── sensors/mid360/       Mid-360：lidar.launch、MID360_config.json（IP）、fastlio.yaml、sensor.yaml
+│   └── nav/                  move_base 与代价地图参数（车身轮廓）
 ├── scripts/
 │   ├── record_tf.py          轨迹记录（camera_init -> body）
 │   ├── live_map.py           录制实时地图推送（127.0.0.1:7012）
@@ -104,7 +108,8 @@ Leishen-CX/
 │   ├── safety_gate.py        安全门：急停、心跳、遇障停车、限速
 │   ├── car_serial.py         /cmd_vel -> /dev/car（Modbus，协议同原 cmd_vel_to_serial.py）
 │   ├── nav_bridge.py         导航 ROS <-> 网页（127.0.0.1:7013）
-│   └── build.sh              编译 catkin_ws
+│   ├── vehicle.py            车辆与传感器配置（各模块共用；--shell 供脚本使用）
+│   └── build.sh              编译 Livox-SDK2 与 catkin_ws
 ├── web/
 │   ├── server.py             7010：录制 API + 页面 + 转发实时地图
 │   ├── nav_server.py         7011：导航 API + 页面 + 转发 nav_bridge
@@ -115,12 +120,31 @@ Leishen-CX/
 ├── catkin_ws/src/            源码（从 ~/workspace 复制）
 │   ├── lslidar_cx_driver     镭神 CX 驱动
 │   ├── fdilink_ahrs          IMU 驱动
-│   ├── FAST_LIO              建图
-│   └── livox_ros_driver      仅消息定义（FAST-LIO 编译依赖）
+│   ├── livox_ros_driver2     Livox 驱动（ROS1）
+│   └── FAST_LIO              建图（加了 Livox PointCloud2 输入 lidar_type 5）
+├── thirdparty/Livox-SDK2/    Livox SDK 源码，build.sh 首次编译到 thirdparty/livox_sdk2
 └── run/                      运行时状态与网页日志（自动生成）
 ```
 
-## 与原建图配置的区别
+## 传感器
+
+切换：在车上写入传感器名，之后录制和导航都用它（成熟地图始终按录制时的传感器生成）：
+
+```bash
+echo mid360 > config/sensor      # 或 cx32；删除该文件即为 cx32
+```
+
+每个传感器一个目录 `config/sensors/<名称>/`，`sensor.yaml` 写话题、驱动、雷达安装位置（`base_link_in_body`）、车头是否与底盘前进方向相反（`chassis_reverse`）和地面高度（`floor_z`），字段说明见 `scripts/vehicle.py`。车身尺寸是同一台底盘，在 `config/nav/costmap_common.yaml`。
+
+**Mid-360**（雷达 192.168.1.185，本机 eth1 192.168.1.71）：
+
+- 平放在原车尾高处（离地 0.67～0.68 m），线缆口朝原车头，+x 指向新车头；新车头是底盘原来的车尾，线速度取反发给底盘
+- 驱动输出 PointCloud2，FAST-LIO 用 `lidar_type: 5` 读取，各模块与镭神共用解析
+- **竖直视场 -7°～52°，平放时近处看不到矮障碍**：车前 1 m 处低于约 0.55 m、2 m 处低于约 0.43 m 的东西看不到，安全门不会为它们停车；实车行驶必须有人跟随、手持遥控器。前倾 20°～30° 安装可改善
+- 车周约 5.5 m 内看不到地面：安全门和成熟地图都用 `floor_z` 给定的地面高度；2D 栅格的可通行区域主要来自远处看到的地面和走过的路线，小房间里可通行区域会偏少
+- `base_link_in_body` 为暂定值，待实测雷达到新车头/车尾/两侧的距离后修改
+
+## 镭神配置与原建图配置的区别
 
 | 参数 | 原配置 | 本项目 |
 |---|---|---|
@@ -138,9 +162,9 @@ Leishen-CX/
 
 注意：360° 时跟在车后的人也会被扫进地图，建图时尽量离车远一些或走在侧面。
 
-**车自身遮挡**：车尾（雷达后方 0.68 m）会被最下面几条激光线扫到。
+**车自身遮挡**（镭神）：车尾（雷达后方 0.68 m）会被最下面几条激光线扫到。
 车身实测相对雷达中心：前 +0.16、后 -0.68、左右各 0.28 m（雷达离地约 0.45 m）。`config/nav/costmap_common.yaml` 中
-`footprint` 以车体几何中心 base_link 为原点（±0.42 × ±0.28 m），`base_link_in_body: [-0.26, 0]` 为它相对雷达/IMU 的位置；
+`footprint` 以车体几何中心 base_link 为原点（±0.42 × ±0.28 m），`sensors/cx32/sensor.yaml` 的 `base_link_in_body: [-0.26, 0]` 为它相对雷达/IMU 的位置；
 `scripts/vehicle.py` 读取它们和外参，建图、定位、实时地图、安全门都去掉轮廓内的点；FAST-LIO 只能按半径过滤，用 `blind: 0.8`。
 注意 `extrinsic_T` 是雷达相对 IMU 的位置（0.28 m），不是雷达离地高度。
 
@@ -174,6 +198,7 @@ npm run build                                    # 输出到 web/dist，刷新�
 
 | 设备 | 连接 | 说明 |
 |---|---|---|
-| 镭神 CX 32 线 | 网口，雷达 IP 192.168.1.200 → 本机 192.168.1.102，UDP 2368/2369 | 本机 IP 不要改 |
+| 镭神 CX 32 线 | 网口，雷达 IP 192.168.1.200 → 本机 192.168.1.102，UDP 2368/2369 | 雷达只发往 .102：换回镭神时本机 eth1 需有该地址 |
 | FDILink IMU | USB（CP2102）→ `/dev/imu`，921600 | udev 规则 `/etc/udev/rules.d/99-imu.rules` |
+| Livox Mid-360 | 网口，雷达 IP 192.168.1.185 → 本机 eth1 192.168.1.71 | 内置 IMU；设备发现走 UDP 56000 广播 |
 | 小车底盘 | USB（CH340）→ `/dev/car`，115200，Modbus RTU | udev 规则 `/etc/udev/rules.d/99-car.rules`；车身约 0.84 × 0.56 m（雷达高 0.45 m） |

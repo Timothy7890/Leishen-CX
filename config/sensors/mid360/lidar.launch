@@ -1,0 +1,17 @@
+<launch>
+  <!-- Livox Mid-360 驱动（点云 + 内置 IMU）。雷达 192.168.1.185，本机 eth1 192.168.1.71，见 MID360_config.json -->
+  <param name="xfer_format" value="0"/>           <!-- 0: PointCloud2（含逐点时间、线号），各模块与镭神共用解析 -->
+  <param name="multi_topic" value="0"/>
+  <param name="data_src" value="0"/>
+  <param name="publish_freq" type="double" value="10.0"/>
+  <param name="output_data_type" value="0"/>
+  <param name="cmdline_str" type="string" value="100000000000000"/>
+  <param name="cmdline_file_path" type="string" value=""/>
+  <param name="user_config_path" type="string" value="$(dirname)/MID360_config.json"/>
+  <param name="frame_id" type="string" value="livox_frame"/>
+  <param name="enable_lidar_bag" type="bool" value="true"/>
+  <param name="enable_imu_bag" type="bool" value="true"/>
+
+  <node name="livox_lidar_publisher2" pkg="livox_ros_driver2" type="livox_ros_driver2_node"
+        required="true" output="screen" args="100000000000000"/>
+</launch>

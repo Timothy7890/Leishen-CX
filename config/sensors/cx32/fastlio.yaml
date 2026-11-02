@@ -1,4 +1,4 @@
-# FAST-LIO 参数（360° 版本）。由 record.sh 通过 rosparam load 加载到全局命名空间。
+# 镭神 CX 32 线 + FDILink IMU 的 FAST-LIO 参数（360°）。由 record.sh / nav.sh 通过 rosparam load 加载到全局命名空间。
 # 相对原 ~/workspace/fast_lio 配置的改动：fov_degree 180 -> 360，blind 2 -> 0.8，
 # dense_publish_en true -> false，timestamp_unit 2 -> 0
 

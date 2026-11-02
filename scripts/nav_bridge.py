@@ -32,7 +32,7 @@ from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float32, Float64, String
 
-from vehicle import FRONT, HALF_WID, REAR, drop_self
+from vehicle import FRONT, HALF_WID, LIDAR_TOPIC, REAR, drop_self
 
 FOOTPRINT = [round(FRONT, 3), round(REAR, 3), round(HALF_WID, 3)]   # 网页画车：body 系前/后/半宽
 
@@ -76,7 +76,7 @@ class Bridge:
         rospy.Subscriber("/move_base/GlobalPlanner/plan", Path, self.on_plan, queue_size=1)
         rospy.Subscriber("/move_base/global_costmap/costmap", OccupancyGrid,
                          lambda m: setattr(self, "costmap", m), queue_size=1)
-        rospy.Subscriber("/velodyne_points", PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
+        rospy.Subscriber(LIDAR_TOPIC, PointCloud2, self.on_cloud, queue_size=1, buff_size=2 ** 24)
         self.mb = actionlib.SimpleActionClient("move_base", MoveBaseAction)
         self.dwa = None
 

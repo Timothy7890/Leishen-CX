@@ -1,0 +1,50 @@
+# Livox Mid-360 的 FAST-LIO 参数。由 record.sh / nav.sh 通过 rosparam load 加载到全局命名空间。
+# 以 FAST-LIO 官方 mid360.yaml 为基础；驱动输出 PointCloud2（lidar_type 5，见 preprocess.cpp livox_pc2_handler），
+# 便于定位、安全门、实时地图等模块与镭神共用同一套点云解析
+
+common:
+    lid_topic:  "/livox/lidar"
+    imu_topic:  "/livox/imu"     # 内置 IMU，加速度单位为 g，FAST-LIO 初始化时按重力归一化
+    time_sync_en: false
+    time_offset_lidar_to_imu: 0.0
+
+preprocess:
+    lidar_type: 5                # 5: Livox PointCloud2（livox_ros_driver2 xfer_format 0）
+    scan_line: 4
+    scan_rate: 10                # Hz
+    timestamp_unit: 3            # 未使用：逐点时间由 livox_pc2_handler 按 ns 换算
+    # 线缆和支架在 0.1~0.4 m 内；车身顶面低于雷达，基本扫不到
+    blind: 0.5
+
+mapping:
+    acc_cov: 0.1
+    gyr_cov: 0.1
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.0001
+    fov_degree:    360
+    det_range:     100.0
+    extrinsic_est_en:  false
+    # 雷达相对内置 IMU（body 原点）的位置，Livox 官方标定值
+    extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+    extrinsic_R: [ 1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1]
+
+publish:
+    path_en:  false
+    scan_publish_en:  true
+    # false: 地图只保存按 filter_size_surf (0.5 m) 降采样后的点，长时间录制不会耗尽内存
+    dense_publish_en: false
+    scan_bodyframe_pub_en: true
+
+pcd_save:
+    pcd_save_en: true
+    interval: -1                 # -1: 结束时保存为一个 scans.pcd
+
+feature_extract_enable: false
+point_filter_num: 3
+max_iteration: 3
+filter_size_surf: 0.5
+filter_size_map: 0.5
+cube_side_length: 1000.0
+runtime_pos_log_enable: false

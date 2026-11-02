@@ -8,7 +8,7 @@
 #    ./nav.sh status
 #
 #  启动后由 7011 网页（web/nav_server.py -> scripts/nav_bridge.py）重定位、下发目标、急停。
-#  与 record.sh 共用雷达，同一时间只能运行一个。
+#  与 record.sh 共用雷达，同一时间只能运行一个。传感器用本车当前配置（config/sensor），与地图录制时用的可以不同。
 # ============================================================================
 
 PROJECT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -17,7 +17,6 @@ STATE_FILE=$RUN_DIR/nav_state
 PID_FILE=$RUN_DIR/nav_pids
 LOCK_DIR=$RUN_DIR/nav_lock
 LOG_DIR=$RUN_DIR/nav_logs
-LIDAR_IP=192.168.1.200
 
 mkdir -p "$RUN_DIR"
 
@@ -100,6 +99,8 @@ shutdown_all() {
 cmd_start() {
     local session=$1 dry=false
     [[ ${2:-} == --dry-run ]] && dry=true
+    # 当前传感器：SENSOR SENSOR_DIR LIDAR_IP LIDAR_TOPIC IMU_TOPIC SENSOR_LAUNCH SENSOR_DEVICES BASE_XY（见 scripts/vehicle.py）
+    sensor_vars=$(python3 "$PROJECT_DIR/scripts/vehicle.py" --shell) && eval "$sensor_vars" || exit 1
     lock
     [[ -n $session && -f $session/nav/meta.json ]] || { echo "不是成熟地图: $session" >&2; exit 1; }
     session=$(cd "$session" && pwd)
@@ -111,7 +112,9 @@ cmd_start() {
         echo "检测到已有 ROS 在运行（可能正在录制），请先停止" >&2; exit 1
     fi
     ping -c 1 -W 1 "$LIDAR_IP" > /dev/null 2>&1 || { echo "雷达 $LIDAR_IP 无法连通" >&2; exit 1; }
-    [[ -e /dev/imu ]] || { echo "未找到 IMU 设备 /dev/imu" >&2; exit 1; }
+    for dev in "${SENSOR_DEVICES[@]}"; do
+        [[ -e $dev ]] || { echo "未找到设备 $dev" >&2; exit 1; }
+    done
 
     rm -rf "$LOG_DIR"; mkdir -p "$LOG_DIR"
     export ROS_LOG_DIR=$LOG_DIR/ros
@@ -133,24 +136,23 @@ cmd_start() {
     for ((i = 0; i < 30; i++)); do rostopic list > /dev/null 2>&1 && break; sleep 0.5; done
     rostopic list > /dev/null 2>&1 || fail "roscore 未启动"
 
-    log "启动雷达与 IMU"
-    launch lidar roslaunch "$PROJECT_DIR/config/lidar_360.launch"
-    wait_topic /velodyne_points 20 || fail "未收到雷达点云"
-    launch imu roslaunch "$PROJECT_DIR/config/imu.launch"
-    wait_topic /imu 15 || fail "未收到 IMU 数据"
+    log "启动传感器驱动（$SENSOR）"
+    for f in "${SENSOR_LAUNCH[@]}"; do
+        launch "${f%.launch}" roslaunch "$SENSOR_DIR/$f"
+    done
+    wait_topic "$LIDAR_TOPIC" 20 || fail "未收到雷达点云"
+    wait_topic "$IMU_TOPIC" 15 || fail "未收到 IMU 数据"
 
     log "启动 FAST-LIO 里程计"
-    rosparam load "$PROJECT_DIR/config/fastlio_360.yaml"
+    rosparam load "$SENSOR_DIR/fastlio.yaml"
     rosparam set /pcd_save/pcd_save_en false
     launch fastlio rosrun fast_lio fastlio_mapping
     wait_topic /Odometry 20 || fail "FAST-LIO 未输出里程计"
 
     log "启动地图定位（自动重定位）"
     launch localizer python3 "$PROJECT_DIR/scripts/localizer.py" "$session/nav"
-    # base_link = 车体几何中心，位置见 config/nav/costmap_common.yaml 的 base_link_in_body
-    local base
-    base=$(python3 -c "import sys; sys.path.insert(0, '$PROJECT_DIR/scripts'); import vehicle; print(*vehicle.BASE_XY)")
-    launch base_tf rosrun tf2_ros static_transform_publisher $base 0 0 0 0 body base_link
+    # base_link = 车体几何中心，位置见 sensor.yaml 的 base_link_in_body
+    launch base_tf rosrun tf2_ros static_transform_publisher $BASE_XY 0 0 0 0 body base_link
     launch map_server rosrun map_server map_server "$session/nav/grid.yaml" _frame_id:=map
 
     log "启动路径规划"

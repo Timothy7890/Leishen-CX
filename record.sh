@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  镭神 CX 360° 录制 + FAST-LIO 实时建图
+#  360° 雷达录制 + FAST-LIO 实时建图（传感器见 config/sensor，镭神 CX / Mid-360）
 #
 #  用法:
 #    ./record.sh start [--rviz]   开始录制（--rviz 在车载显示器上打开 rviz）
@@ -9,6 +9,7 @@
 #
 #  每次录制输出到 $DATA_ROOT/<开始时间>/:
 #    raw.bag  map.pcd  trajectory.csv  config/  logs/  info.txt
+#  config/sensor 记录本次使用的传感器，成熟地图按它重跑
 # ============================================================================
 
 PROJECT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -17,7 +18,6 @@ RUN_DIR=$PROJECT_DIR/run              # 运行时状态（当前录制、各进�
 STATE_FILE=$RUN_DIR/state
 PID_FILE=$RUN_DIR/pids
 LOCK_DIR=$RUN_DIR/lock
-LIDAR_IP=192.168.1.200
 FASTLIO_PCD=$PROJECT_DIR/catkin_ws/src/FAST_LIO/PCD/scans.pcd
 
 mkdir -p "$RUN_DIR" "$DATA_ROOT"
@@ -127,6 +127,8 @@ shutdown_all() {
 cmd_start() {
     local rviz=false
     [[ ${1:-} == --rviz ]] && rviz=true
+    # 当前传感器：SENSOR SENSOR_DIR LIDAR_IP LIDAR_TOPIC IMU_TOPIC SENSOR_LAUNCH SENSOR_DEVICES（见 scripts/vehicle.py）
+    sensor_vars=$(python3 "$PROJECT_DIR/scripts/vehicle.py" --shell) && eval "$sensor_vars" || exit 1
     lock
     clear_stale
 
@@ -142,14 +144,17 @@ cmd_start() {
         echo "雷达 $LIDAR_IP 无法连通，请检查网线和电源" >&2
         exit 1
     fi
-    if [[ ! -e /dev/imu ]]; then
-        echo "未找到 IMU 设备 /dev/imu，请检查 USB 连接" >&2
-        exit 1
-    fi
+    for dev in "${SENSOR_DEVICES[@]}"; do
+        if [[ ! -e $dev ]]; then
+            echo "未找到设备 $dev，请检查 USB 连接" >&2
+            exit 1
+        fi
+    done
 
     SESSION="$DATA_ROOT/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$SESSION/logs" "$SESSION/config"
-    cp "$PROJECT_DIR"/config/*.launch "$PROJECT_DIR"/config/*.yaml "$SESSION/config/"
+    cp "$SENSOR_DIR"/* "$PROJECT_DIR/config/nav/costmap_common.yaml" "$SESSION/config/"
+    echo "$SENSOR" > "$SESSION/config/sensor"
     export ROS_LOG_DIR="$SESSION/logs/ros"
     rm -f "$PID_FILE" "$STATE_FILE" "$FASTLIO_PCD"
 
@@ -173,16 +178,15 @@ cmd_start() {
     for ((i = 0; i < 30; i++)); do rostopic list > /dev/null 2>&1 && break; sleep 0.5; done
     rostopic list > /dev/null 2>&1 || fail "roscore 未启动"
 
-    log "启动雷达驱动（360° 不裁剪）"
-    launch lidar roslaunch "$PROJECT_DIR/config/lidar_360.launch"
-    wait_topic /velodyne_points 20 || fail "未收到雷达点云 /velodyne_points"
-
-    log "启动 IMU 驱动"
-    launch imu roslaunch "$PROJECT_DIR/config/imu.launch"
-    wait_topic /imu 15 || fail "未收到 IMU 数据 /imu"
+    log "启动传感器驱动（$SENSOR）"
+    for f in "${SENSOR_LAUNCH[@]}"; do
+        launch "${f%.launch}" roslaunch "$SENSOR_DIR/$f"
+    done
+    wait_topic "$LIDAR_TOPIC" 20 || fail "未收到雷达点云 $LIDAR_TOPIC"
+    wait_topic "$IMU_TOPIC" 15 || fail "未收到 IMU 数据 $IMU_TOPIC"
 
     log "启动 FAST-LIO 实时建图"
-    rosparam load "$PROJECT_DIR/config/fastlio_360.yaml"
+    rosparam load "$SENSOR_DIR/fastlio.yaml"
     launch fastlio rosrun fast_lio fastlio_mapping
     wait_topic /Odometry 20 || fail "FAST-LIO 未输出里程计 /Odometry"
 
@@ -193,7 +197,7 @@ cmd_start() {
     launch trajectory python3 "$PROJECT_DIR/scripts/record_tf.py" "_output_file:=$SESSION/trajectory.csv"
 
     log "启动原始数据录制"
-    launch rosbag rosbag record -O "$SESSION/raw.bag" /velodyne_points /imu
+    launch rosbag rosbag record -O "$SESSION/raw.bag" "$LIDAR_TOPIC" "$IMU_TOPIC"
 
     if $rviz; then
         DISPLAY=${DISPLAY:-:0} launch rviz rosrun rviz rviz -d "$PROJECT_DIR/catkin_ws/src/FAST_LIO/rviz_cfg/loam_livox.rviz"
@@ -238,7 +242,7 @@ duration_s=$((end - started))
 bag_size=${bag_size:-无}
 map_points=${points:-0}
 trajectory_poses=$traj_rows
-lidar=LeiShen CX 32 线, 360° 不裁剪
+sensor=$(cat "$SESSION/config/sensor" 2>/dev/null || echo cx32)
 EOF
     rm -f "$STATE_FILE"
     log "已保存到 $SESSION"

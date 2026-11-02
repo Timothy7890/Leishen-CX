@@ -26,7 +26,7 @@ import rosbag
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation, Slerp
 
-from vehicle import HALF_WID, base_xy, inside_body, lidar_to_body
+from vehicle import FLOOR_Z, HALF_WID, LIDAR_TOPIC, SENSOR, base_xy, inside_body, lidar_to_body
 
 VOXEL = 0.05                # 高密度地图体素 (m)
 GRID_RES = 0.05             # 2D 栅格分辨率 (m)
@@ -77,16 +77,20 @@ def build_dense(bag_path, ot, op, orot):
     slerp = Slerp(ot, orot)
     keys, counts = np.empty(0, np.int64), np.empty(0, np.int64)
     batch, n_scan = [], 0
-    for _, msg, _ in rosbag.Bag(bag_path).read_messages(topics=["/velodyne_points"]):
+    for _, msg, _ in rosbag.Bag(bag_path).read_messages(topics=[LIDAR_TOPIC]):
         off = {f.name: f.offset for f in msg.fields}
-        dt = np.dtype({"names": ["x", "y", "z", "t"], "formats": ["<f4"] * 4,
-                       "offsets": [off["x"], off["y"], off["z"], off["time"]], "itemsize": msg.point_step})
+        # 逐点时间：镭神 time 为相对帧头的秒（float32），Livox timestamp 为绝对时间 ns（float64）
+        livox = "timestamp" in off
+        dt = np.dtype({"names": ["x", "y", "z", "t"], "formats": ["<f4"] * 3 + ["<f8" if livox else "<f4"],
+                       "offsets": [off["x"], off["y"], off["z"], off["timestamp" if livox else "time"]],
+                       "itemsize": msg.point_step})
         pts = np.frombuffer(msg.data, dtype=dt, count=msg.width * msg.height)
         xyz = np.stack([pts["x"], pts["y"], pts["z"]], 1).astype(np.float64)
         r = np.linalg.norm(xyz, axis=1)
         ok = np.isfinite(r) & (r > RANGE_MIN) & (r < RANGE_MAX)
         b = lidar_to_body(xyz[ok])
-        ta = msg.header.stamp.to_sec() + pts["t"][ok].astype(np.float64)
+        t = pts["t"][ok].astype(np.float64)
+        ta = t * 1e-9 if livox else msg.header.stamp.to_sec() + t
         # 去掉车身轮廓内的点（车尾部件）和位姿范围外的点
         keep = (ta >= ot[0]) & (ta <= ot[-1]) & ~inside_body(b[:, 0], b[:, 1])
         if keep.sum() < 100:
@@ -199,7 +203,8 @@ def main():
     xyz, hits = build_dense(os.path.join(session, "raw.bag"), ot, op, orot)
     write_pcd(os.path.join(nav, "map_dense.pcd"), xyz)
 
-    floor = estimate_floor(xyz, op)
+    # 传感器配置给出 body 系地面高度时直接用（Mid-360 车周约 5.5 m 内看不到地面，无法从点云估计）
+    floor = float(np.median(op[:, 2]) + FLOOR_Z) if FLOOR_Z is not None else estimate_floor(xyz, op)
     log(f"地面高度 z = {floor:.3f}（车体坐标原点在地面以上 {np.median(op[:, 2]) - floor:.2f} m）")
 
     log("生成 2D 栅格")
@@ -221,6 +226,7 @@ def main():
         "name": name,
         "session": os.path.basename(session.rstrip("/")),
         "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "sensor": SENSOR,
         "floor_z": round(floor, 3),
         "grid": {"resolution": GRID_RES, "origin": [round(origin[0], 3), round(origin[1], 3)],
                  "width": img.shape[1], "height": img.shape[0], "occupied": n_occ, "free": n_free},
