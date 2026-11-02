@@ -3,7 +3,7 @@
     外参   config/fastlio_360.yaml    mapping/extrinsic_R、extrinsic_T：p_body = R @ p_lidar + T
     车身   config/nav/costmap_common.yaml  footprint（body 系 xy，与 move_base 一致）
 
-车尾（雷达后方约 0.55~0.7 m、离地约 0.3 m 的两处部件）会被最下面两条激光线扫到，
+车尾（雷达后方约 0.68 m）会被最下面几条激光线扫到，
 这些点跟着车走，必须用 drop_self() 去掉，否则会在地图上沿行驶路线留下一层假障碍。
 """
 from pathlib import Path

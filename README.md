@@ -138,8 +138,8 @@ Leishen-CX/
 
 注意：360° 时跟在车后的人也会被扫进地图，建图时尽量离车远一些或走在侧面。
 
-**车自身遮挡**：车尾两处部件（雷达后方 0.53~0.68 m、左右各约 0.2 m、离地约 0.3 m）会被最下面两条激光线扫到。
-车身轮廓定义在 `config/nav/costmap_common.yaml` 的 `footprint`（前 +0.5、后 -0.75、宽 0.8 m），
+**车自身遮挡**：车尾（雷达后方 0.68 m）会被最下面几条激光线扫到。
+车身轮廓定义在 `config/nav/costmap_common.yaml` 的 `footprint`（相对雷达中心：前 +0.16、后 -0.68、左右各 0.28 m；雷达高度 0.45 m），
 `scripts/vehicle.py` 读取它和外参，建图、定位、实时地图、安全门都去掉轮廓内的点；FAST-LIO 只能按半径过滤，用 `blind: 0.8`。
 
 ## 网页服务
@@ -174,4 +174,4 @@ npm run build                                    # 输出到 web/dist，刷新�
 |---|---|---|
 | 镭神 CX 32 线 | 网口，雷达 IP 192.168.1.200 → 本机 192.168.1.102，UDP 2368/2369 | 本机 IP 不要改 |
 | FDILink IMU | USB（CP2102）→ `/dev/imu`，921600 | udev 规则 `/etc/udev/rules.d/99-imu.rules` |
-| 小车底盘 | USB（CH340）→ `/dev/car`，115200，Modbus RTU | udev 规则 `/etc/udev/rules.d/99-car.rules`；车身 1.0 × 0.8 m |
+| 小车底盘 | USB（CH340）→ `/dev/car`，115200，Modbus RTU | udev 规则 `/etc/udev/rules.d/99-car.rules`；车身约 0.84 × 0.56 m（雷达高 0.45 m） |

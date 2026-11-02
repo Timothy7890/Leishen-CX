@@ -15,7 +15,7 @@ preprocess:
     # 点云 time 字段单位: 0-s, 1-ms, 2-us, 3-ns。镭神驱动输出的是秒（每帧 0~0.1）；
     # 原配置误设为 2，FAST-LIO 运动补偿失效，转弯后地图出现重影
     timestamp_unit: 0
-    # 小于该距离 (m) 的点不参与建图。车尾部件在雷达后方 0.53~0.68 m，会被最下面两条线扫到，
+    # 小于该距离 (m) 的点不参与建图。车尾在雷达后方 0.68 m，车身点会被扫到；
     # 这些点跟着车走，会把里程计往"没动"拉；FAST-LIO 只能按半径过滤，故取 0.8
     blind: 0.8
 
@@ -27,7 +27,8 @@ mapping:
     fov_degree:    360
     det_range:     100.0
     extrinsic_est_en:  false
-    extrinsic_T: [ 0, 0, 0.28]
+    # 雷达在 body 原点正上方；高度为实测离地/相对 body 原点 0.45 m
+    extrinsic_T: [ 0, 0, 0.45]
     extrinsic_R: [ 1, 0, 0,
                    0, 1, 0,
                    0, 0, 1]
