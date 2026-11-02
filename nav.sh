@@ -147,7 +147,10 @@ cmd_start() {
 
     log "启动地图定位（自动重定位）"
     launch localizer python3 "$PROJECT_DIR/scripts/localizer.py" "$session/nav"
-    launch base_tf rosrun tf2_ros static_transform_publisher 0 0 0 0 0 0 body base_link
+    # base_link = 车体几何中心，位置见 config/nav/costmap_common.yaml 的 base_link_in_body
+    local base
+    base=$(python3 -c "import sys; sys.path.insert(0, '$PROJECT_DIR/scripts'); import vehicle; print(*vehicle.BASE_XY)")
+    launch base_tf rosrun tf2_ros static_transform_publisher $base 0 0 0 0 body base_link
     launch map_server rosrun map_server map_server "$session/nav/grid.yaml" _frame_id:=map
 
     log "启动路径规划"

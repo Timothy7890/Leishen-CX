@@ -26,7 +26,7 @@ import rosbag
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation, Slerp
 
-from vehicle import inside_body, lidar_to_body
+from vehicle import HALF_WID, base_xy, inside_body, lidar_to_body
 
 VOXEL = 0.05                # 高密度地图体素 (m)
 GRID_RES = 0.05             # 2D 栅格分辨率 (m)
@@ -35,8 +35,8 @@ MIN_HITS = 2                # 体素至少被扫到 2 次才保留（去掉走�
 OBST_LOW, OBST_HIGH = 0.15, 1.6   # 地面以上该高度区间内的点视为障碍
 OBST_MIN_HITS = 5           # 栅格障碍只用被扫到 ≥5 次的体素：墙会被扫到上百次，路过的人只有几次
 SPECKLE_CELLS = 3           # 小于该面积（格）的孤立障碍视为噪点
-# 建图轨迹两侧该半径内清除障碍：车开过的地方必然可通行（取车半宽）
-SWEPT_CLEAR_R = 0.4
+# 车体几何中心（base_link）走过的路线两侧该半径内清除障碍：车开过的地方必然可通行（取车半宽）
+SWEPT_CLEAR_R = HALF_WID
 OFF = 1 << 20               # 体素索引偏移，便于编码成一个 int64
 
 
@@ -129,7 +129,8 @@ def estimate_floor(xyz, traj_xyz):
     return float((edges[i] + edges[i + 1]) / 2)
 
 
-def build_grid(xyz, hits, floor, traj_xyz):
+def build_grid(xyz, hits, floor, base_path):
+    """base_path: 车体几何中心（base_link）走过的 xy 路线。"""
     x0, y0 = xyz[:, 0].min() - 1.0, xyz[:, 1].min() - 1.0
     W = int(np.ceil((xyz[:, 0].max() + 1.0 - x0) / GRID_RES))
     H = int(np.ceil((xyz[:, 1].max() + 1.0 - y0) / GRID_RES))
@@ -149,9 +150,9 @@ def build_grid(xyz, hits, floor, traj_xyz):
     small = np.where(stats[:, cv2.CC_STAT_AREA] < SPECKLE_CELLS)[0]
     occupied[np.isin(labels, small[small > 0])] = 0
 
-    # 车走过的地方一定可通行：轨迹画成折线后膨胀
-    tx = ((traj_xyz[:, 0] - x0) / GRID_RES).astype(np.int32)
-    ty = ((traj_xyz[:, 1] - y0) / GRID_RES).astype(np.int32)
+    # 车走过的地方一定可通行：车体中心路线画成折线后膨胀
+    tx = ((base_path[:, 0] - x0) / GRID_RES).astype(np.int32)
+    ty = ((base_path[:, 1] - y0) / GRID_RES).astype(np.int32)
     line = np.zeros((H, W), np.uint8)
     cv2.polylines(line, [np.stack([tx, ty], 1).reshape(-1, 1, 2)], False, 1, 1)
     disk = lambda r: cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * int(r / GRID_RES) + 1,) * 2)
@@ -160,7 +161,7 @@ def build_grid(xyz, hits, floor, traj_xyz):
 
     # 地面点稀疏处补齐（雷达线间空隙），加上车身扫过的范围，再扣掉障碍
     free = cv2.morphologyEx(ground, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)).astype(bool)
-    free |= cv2.dilate(line, disk(0.45)).astype(bool)
+    free |= cv2.dilate(line, disk(SWEPT_CLEAR_R + 0.15)).astype(bool)
     free &= ~occupied
 
     img = np.full((H, W), 205, np.uint8)       # 未知
@@ -202,7 +203,7 @@ def main():
     log(f"地面高度 z = {floor:.3f}（车体坐标原点在地面以上 {np.median(op[:, 2]) - floor:.2f} m）")
 
     log("生成 2D 栅格")
-    img, origin, n_occ, n_free = build_grid(xyz, hits, floor, op)
+    img, origin, n_occ, n_free = build_grid(xyz, hits, floor, np.stack(base_xy(op[:, 0], op[:, 1], yaw), 1))
     cv2.imwrite(os.path.join(nav, "grid.pgm"), img)
     with open(os.path.join(nav, "grid.yaml"), "w") as f:
         f.write(f"image: grid.pgm\nresolution: {GRID_RES}\norigin: [{origin[0]:.3f}, {origin[1]:.3f}, 0.0]\n"

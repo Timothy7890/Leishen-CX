@@ -139,8 +139,10 @@ Leishen-CX/
 注意：360° 时跟在车后的人也会被扫进地图，建图时尽量离车远一些或走在侧面。
 
 **车自身遮挡**：车尾（雷达后方 0.68 m）会被最下面几条激光线扫到。
-车身轮廓定义在 `config/nav/costmap_common.yaml` 的 `footprint`（相对雷达中心：前 +0.16、后 -0.68、左右各 0.28 m；雷达高度 0.45 m），
-`scripts/vehicle.py` 读取它和外参，建图、定位、实时地图、安全门都去掉轮廓内的点；FAST-LIO 只能按半径过滤，用 `blind: 0.8`。
+车身实测相对雷达中心：前 +0.16、后 -0.68、左右各 0.28 m（雷达离地约 0.45 m）。`config/nav/costmap_common.yaml` 中
+`footprint` 以车体几何中心 base_link 为原点（±0.42 × ±0.28 m），`base_link_in_body: [-0.26, 0]` 为它相对雷达/IMU 的位置；
+`scripts/vehicle.py` 读取它们和外参，建图、定位、实时地图、安全门都去掉轮廓内的点；FAST-LIO 只能按半径过滤，用 `blind: 0.8`。
+注意 `extrinsic_T` 是雷达相对 IMU 的位置（0.28 m），不是雷达离地高度。
 
 ## 网页服务
 

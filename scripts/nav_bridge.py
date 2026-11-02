@@ -32,7 +32,9 @@ from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float32, Float64, String
 
-from vehicle import drop_self
+from vehicle import FRONT, HALF_WID, REAR, drop_self
+
+FOOTPRINT = [round(FRONT, 3), round(REAR, 3), round(HALF_WID, 3)]   # 网页画车：body 系前/后/半宽
 
 PORT = 7013
 SCAN_MAX = 2500
@@ -196,7 +198,8 @@ class Bridge:
         with self.lock:
             s = {"pose": self.pose, "loc": self.loc, "gate": self.gate, "serial": self.serial,
                  "goal": self.goal, "goal_state": self.goal_state(), "plan": self.plan,
-                 "scan": self.scan, "scan_unit": SCAN_UNIT, "speed": self.speed, "estop": self.estop}
+                 "scan": self.scan, "scan_unit": SCAN_UNIT, "speed": self.speed, "estop": self.estop,
+                 "footprint": FOOTPRINT}
         return json.dumps(s, ensure_ascii=False, separators=(",", ":"))
 
 

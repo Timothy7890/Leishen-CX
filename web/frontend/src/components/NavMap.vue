@@ -122,14 +122,15 @@ function draw() {
   if (st.goal && ['pending', 'active'].includes(st.goal_state)) arrow(ctx, ...st.goal, 13, '#f59e0b')
 
   if (st.pose) {
-    // 车身轮廓 1.0 x 0.8 m
+    // 车身轮廓：pose 为雷达位置，footprint = [前, 后, 半宽]（相对雷达，见 config/nav/costmap_common.yaml）
     const [x, y, yaw] = st.pose
+    const [front, rear, hw] = st.footprint || [0.16, -0.68, 0.28]
     const c = Math.cos(yaw), s = Math.sin(yaw)
     ctx.fillStyle = 'rgba(37,99,235,0.25)'
     ctx.strokeStyle = '#1d4ed8'
     ctx.lineWidth = 1.5
     ctx.beginPath()
-    ;[[0.5, 0.4], [0.5, -0.4], [-0.5, -0.4], [-0.5, 0.4]].forEach(([dx, dy], i) => {
+    ;[[front, hw], [front, -hw], [rear, -hw], [rear, hw]].forEach(([dx, dy], i) => {
       const [sx, sy] = toScreen(x + c * dx - s * dy, y + s * dx + c * dy)
       i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy)
     })

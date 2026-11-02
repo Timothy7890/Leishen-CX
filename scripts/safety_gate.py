@@ -29,7 +29,7 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float32, Float64, String
 
-from vehicle import FRONT, HALF_WID, SELF_MARGIN, SWEEP_R, inside_body, lidar_to_body
+from vehicle import BASE_XY, FRONT, HALF_WID, SELF_MARGIN, SWEEP_R, inside_body, lidar_to_body
 
 # 车身轮廓来自 config/nav/costmap_common.yaml（见 scripts/vehicle.py），轮廓内的点视为车自身
 FRONT_MIN, FRONT_PER_V = 0.5, 1.0   # 前方检测距离 = 车头外 0.5 m + 1.0 s × 速度
@@ -113,7 +113,8 @@ class Gate:
             v = self.cmd.linear.x
         reach = FRONT + FRONT_MIN + FRONT_PER_V * max(0.0, v)
         front = (x > FRONT + SELF_MARGIN) & (x < reach) & (np.abs(y) < HALF_WID + SIDE_MARGIN)
-        ring = not_self & (np.hypot(x, y) < SWEEP_R + TURN_MARGIN)
+        # 原地转向绕车体几何中心 base_link
+        ring = not_self & (np.hypot(x - BASE_XY[0], y - BASE_XY[1]) < SWEEP_R + TURN_MARGIN)
         with self.lock:
             self.front_hits, self.ring_hits = int(front.sum()), int(ring.sum())
             self.scan_t = time.time()
