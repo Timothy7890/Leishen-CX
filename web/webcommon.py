@@ -4,6 +4,7 @@ import mimetypes
 import os
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
@@ -13,6 +14,19 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_ROOT = Path(os.environ.get("LIDAR_DATA_ROOT", Path.home() / "yx/Data/Lidar_data"))
 DIST_DIR = Path(__file__).resolve().parent / "dist"
 SESSION_RE = re.compile(r"^\d{8}_\d{6}$")
+
+
+class LastError:
+    """最近一次启动/停止失败的提示，只在一段时间内显示，避免状态恢复后旧报错一直挂在页面上。"""
+
+    def __init__(self, ttl=60):
+        self.ttl, self.msg, self.t = ttl, "", 0.0
+
+    def set(self, msg):
+        self.msg, self.t = msg, time.time()
+
+    def get(self):
+        return self.msg if time.time() - self.t < self.ttl else ""
 
 
 def run_script(script, *args, timeout=None):

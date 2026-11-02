@@ -15,7 +15,7 @@ import threading
 import time
 from http.server import ThreadingHTTPServer
 
-from webcommon import (DATA_ROOT, PROJECT_DIR, BaseHandler, last_line, mature_info, mature_running, parse_kv,
+from webcommon import (DATA_ROOT, PROJECT_DIR, BaseHandler, LastError, last_line, mature_info, mature_running, parse_kv,
                        run_script, session_dir)
 
 PORT = int(os.environ.get("RECORD_WEB_PORT", "7010"))
@@ -25,7 +25,7 @@ LIVE_URL = "http://127.0.0.1:7012/stream"
 
 busy = threading.Lock()   # 同一时间只允许一个 start/stop
 mature_lock = threading.Lock()
-last_error = {"msg": ""}
+last_error = LastError()
 
 
 def list_sessions(limit=30):
@@ -55,7 +55,7 @@ def status_payload():
     st = parse_kv(out)
     if busy.locked() and st.get("status") in (None, "idle"):
         st["status"] = "starting"
-    st["error"] = last_error["msg"]
+    st["error"] = last_error.get()
     st["data_root"] = str(DATA_ROOT)
     st["sessions"] = list_sessions()
     return st
@@ -64,7 +64,7 @@ def status_payload():
 def do_stop():
     with busy:
         code, out = run_script(RECORD_SH, "stop", timeout=600)
-        last_error["msg"] = "" if code == 0 else last_line(out, "停止失败")
+        last_error.set("" if code == 0 else last_line(out, "停止失败"))
 
 
 def start_mature(body):
@@ -113,7 +113,7 @@ class Handler(BaseHandler):
                 code, out = run_script(RECORD_SH, "start", timeout=120)
             finally:
                 busy.release()
-            last_error["msg"] = "" if code == 0 else last_line(out, "启动失败")
+            last_error.set("" if code == 0 else last_line(out, "启动失败"))
             self.send(200 if code == 0 else 500, {"ok": code == 0, "msg": out})
         elif self.path == "/api/stop":
             if busy.locked():

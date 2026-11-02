@@ -17,7 +17,7 @@ from http.server import ThreadingHTTPServer
 
 import numpy as np
 
-from webcommon import (DATA_ROOT, PROJECT_DIR, BaseHandler, last_line, parse_kv, read_json, run_script,
+from webcommon import (DATA_ROOT, PROJECT_DIR, BaseHandler, LastError, last_line, parse_kv, read_json, run_script,
                        session_dir)
 
 PORT = int(os.environ.get("NAV_WEB_PORT", "7011"))
@@ -26,7 +26,7 @@ BRIDGE = "http://127.0.0.1:7013"
 BRIDGE_CMDS = {"reloc", "goal", "cancel", "estop", "speed", "heartbeat"}
 
 busy = threading.Lock()
-last_error = {"msg": ""}
+last_error = LastError()
 
 
 def list_maps():
@@ -51,7 +51,7 @@ def nav_status():
     st = parse_kv(out)
     if busy.locked() and st.get("status") in (None, "idle"):
         st["status"] = "starting"
-    st["error"] = last_error["msg"]
+    st["error"] = last_error.get()
     _, rec = run_script(PROJECT_DIR / "record.sh", "status", timeout=10)
     st["recording"] = parse_kv(rec).get("status") not in (None, "idle")
     return st
@@ -60,7 +60,7 @@ def nav_status():
 def do_stop():
     with busy:
         code, out = run_script(NAV_SH, "stop", timeout=120)
-        last_error["msg"] = "" if code == 0 else last_line(out, "停止失败")
+        last_error.set("" if code == 0 else last_line(out, "停止失败"))
 
 
 class Handler(BaseHandler):
@@ -102,7 +102,7 @@ class Handler(BaseHandler):
                 code, out = run_script(NAV_SH, *args, timeout=150)
             finally:
                 busy.release()
-            last_error["msg"] = "" if code == 0 else last_line(out, "启动失败")
+            last_error.set("" if code == 0 else last_line(out, "启动失败"))
             self.send(200 if code == 0 else 500, {"ok": code == 0, "msg": out})
         elif path == "/api/nav/stop":
             if busy.locked():
