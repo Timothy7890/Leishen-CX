@@ -1,6 +1,10 @@
 # 全局 / 局部代价地图共用参数（加载到 global_costmap 和 local_costmap 命名空间）
-# 车身 1.0 x 0.8 m，与原 racebot 配置及 scripts/safety_gate.py 一致
-footprint: [[0.5, 0.4], [0.5, -0.4], [-0.5, -0.4], [-0.5, 0.4]]
+#
+# 车身轮廓（body 系，x 向前，单位 m）。也是 scripts/vehicle.py 的唯一来源：
+# 安全门的检测区域、建图/定位时去除车自身点都按这个轮廓。
+#   前 +0.5、宽 0.8 沿用原 racebot 配置；
+#   后 -0.75 来自数据：车尾两处部件在雷达后方 0.53~0.68 m（20261102_211608 录制中 >70% 的帧都扫到）
+footprint: [[0.5, 0.4], [0.5, -0.4], [-0.75, -0.4], [-0.75, 0.4]]
 robot_base_frame: base_link
 global_frame: map
 transform_tolerance: 0.5

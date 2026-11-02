@@ -122,7 +122,7 @@ Leishen-CX/
 |---|---|---|
 | 雷达裁剪角度 `angle_disable_min/max` | 20000 / 34000（裁掉 200°–340°） | 0 / 0（不裁剪） |
 | FAST-LIO `fov_degree` | 180 | 360 |
-| FAST-LIO `blind`（近距离盲区） | 2 m | 0.5 m |
+| FAST-LIO `blind`（近距离盲区） | 2 m | 0.8 m（去掉车尾自身，见下） |
 | FAST-LIO `dense_publish_en` | true（保存每帧全部点） | false（保存 0.5 m 降采样后的点） |
 | FAST-LIO `timestamp_unit` | 2（微秒，错误） | 0（秒，与驱动输出一致） |
 
@@ -133,6 +133,10 @@ Leishen-CX/
 原始数据包约 1.1 GB/分钟，注意剩余磁盘空间。
 
 注意：360° 时跟在车后的人也会被扫进地图，建图时尽量离车远一些或走在侧面。
+
+**车自身遮挡**：车尾两处部件（雷达后方 0.53~0.68 m、左右各约 0.2 m、离地约 0.3 m）会被最下面两条激光线扫到。
+车身轮廓定义在 `config/nav/costmap_common.yaml` 的 `footprint`（前 +0.5、后 -0.75、宽 0.8 m），
+`scripts/vehicle.py` 读取它和外参，建图、定位、实时地图、安全门都去掉轮廓内的点；FAST-LIO 只能按半径过滤，用 `blind: 0.8`。
 
 ## 网页服务
 

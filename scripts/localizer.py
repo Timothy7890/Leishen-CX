@@ -36,7 +36,8 @@ from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
 
-LIDAR_TO_IMU = np.array([0.0, 0.0, 0.28])
+from vehicle import drop_self
+
 SCAN_VOXEL = 0.1
 RELOC_SCANS = 10            # 重定位用最近 1 s 的扫描
 TRACK_SCANS = 5
@@ -172,7 +173,7 @@ class Localizer:
         r2 = np.einsum("ij,ij->i", xyz, xyz)
         xyz = voxel_np(xyz[np.isfinite(r2) & (r2 > 0.25) & (r2 < 900)], SCAN_VOXEL)
         with self.lock:
-            self.pending.append((t_end, xyz + LIDAR_TO_IMU))
+            self.pending.append((t_end, drop_self(xyz)))
 
     def on_request(self, msg):
         try:

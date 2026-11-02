@@ -32,8 +32,9 @@ from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float32, Float64, String
 
+from vehicle import drop_self
+
 PORT = 7013
-LIDAR_TO_IMU = np.array([0.0, 0.0, 0.28])
 SCAN_MAX = 2500
 SCAN_UNIT = 0.02            # 障碍点以 2 cm 为单位编码成 int16
 GOAL_SNAP_R = 1.0           # 目标点离障碍太近时，在该半径内找最近的可达点
@@ -112,7 +113,7 @@ class Bridge:
         p = np.frombuffer(msg.data, dtype=dt, count=msg.width * msg.height)
         xyz = np.stack([p["x"], p["y"], p["z"]], 1).astype(np.float64)
         xyz = xyz[np.isfinite(xyz).all(1) & (np.einsum("ij,ij->i", xyz, xyz) > 0.25)]
-        w = (xyz + LIDAR_TO_IMU) @ T[0].T + T[1]
+        w = drop_self(xyz) @ T[0].T + T[1]
         h = w[:, 2] - self.floor_map
         w = w[(h > 0.1) & (h < 1.6)]
         if len(w) > SCAN_MAX:

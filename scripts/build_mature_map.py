@@ -26,17 +26,17 @@ import rosbag
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation, Slerp
 
+from vehicle import inside_body, lidar_to_body
+
 VOXEL = 0.05                # 高密度地图体素 (m)
 GRID_RES = 0.05             # 2D 栅格分辨率 (m)
-LIDAR_TO_IMU = np.array([0.0, 0.0, 0.28])   # 与 fastlio_360.yaml extrinsic_T 一致
 RANGE_MIN, RANGE_MAX = 0.5, 40.0
 MIN_HITS = 2                # 体素至少被扫到 2 次才保留（去掉走动的人等动态噪点）
 OBST_LOW, OBST_HIGH = 0.15, 1.6   # 地面以上该高度区间内的点视为障碍
 OBST_MIN_HITS = 5           # 栅格障碍只用被扫到 ≥5 次的体素：墙会被扫到上百次，路过的人只有几次
 SPECKLE_CELLS = 3           # 小于该面积（格）的孤立障碍视为噪点
-# 建图轨迹两侧该半径内清除障碍：车开过的地方必然可通行。需略大于规划用的车半宽（0.4 m），
-# 否则窄处（实测轨迹离障碍最近 0.3 m）在代价地图里会被判为碰撞，规划不出路径
-SWEPT_CLEAR_R = 0.45
+# 建图轨迹两侧该半径内清除障碍：车开过的地方必然可通行（取车半宽）
+SWEPT_CLEAR_R = 0.4
 OFF = 1 << 20               # 体素索引偏移，便于编码成一个 int64
 
 
@@ -85,16 +85,17 @@ def build_dense(bag_path, ot, op, orot):
         xyz = np.stack([pts["x"], pts["y"], pts["z"]], 1).astype(np.float64)
         r = np.linalg.norm(xyz, axis=1)
         ok = np.isfinite(r) & (r > RANGE_MIN) & (r < RANGE_MAX)
-        xyz = xyz[ok]
+        b = lidar_to_body(xyz[ok])
         ta = msg.header.stamp.to_sec() + pts["t"][ok].astype(np.float64)
-        inside = (ta >= ot[0]) & (ta <= ot[-1])
-        if inside.sum() < 100:
+        # 去掉车身轮廓内的点（车尾部件）和位姿范围外的点
+        keep = (ta >= ot[0]) & (ta <= ot[-1]) & ~inside_body(b[:, 0], b[:, 1])
+        if keep.sum() < 100:
             continue
-        xyz, ta = xyz[inside], ta[inside]
+        b, ta = b[keep], ta[keep]
         # 逐点按扫描时刻插值位姿（去畸变）
         R = slerp(ta)
         trans = np.stack([np.interp(ta, ot, op[:, i]) for i in range(3)], 1)
-        w = R.apply(xyz + LIDAR_TO_IMU) + trans
+        w = R.apply(b) + trans
         iv = np.floor(w / VOXEL).astype(np.int64)
         batch.append(np.unique(encode(iv[:, 0], iv[:, 1], iv[:, 2])))
         n_scan += 1

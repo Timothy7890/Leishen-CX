@@ -8,7 +8,7 @@
   - 定位未就绪或丢失（/nav/loc_status）
   - 网页心跳超过 HEARTBEAT_TIMEOUT 秒未更新（/nav/heartbeat）
   - 雷达数据中断，或 move_base 指令超时
-  - 障碍物：前进时车头前方区域、原地转向时车身四周一圈内有障碍
+  - 障碍物：前进时车头前方区域、原地转向时车角扫过的圆内有障碍
     -> 停车等待，障碍持续消失 CLEAR_HOLD 秒后自动继续（不绕行）
 
 另外限速：线速度 [0, max_speed]（不倒车），角速度 ±MAX_W。
@@ -29,12 +29,12 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float32, Float64, String
 
-# 车身（雷达位于中心，单位 m）。与 config/nav/costmap_common.yaml footprint 一致
-HALF_LEN, HALF_WID = 0.5, 0.4
-SELF_MARGIN = 0.05          # 车身范围内的点视为车自身，忽略
-FRONT_MIN, FRONT_PER_V = 0.5, 1.0   # 前方检测距离 = 0.5 m + 1.0 s × 速度
+from vehicle import FRONT, HALF_WID, SELF_MARGIN, SWEEP_R, inside_body, lidar_to_body
+
+# 车身轮廓来自 config/nav/costmap_common.yaml（见 scripts/vehicle.py），轮廓内的点视为车自身
+FRONT_MIN, FRONT_PER_V = 0.5, 1.0   # 前方检测距离 = 车头外 0.5 m + 1.0 s × 速度
 SIDE_MARGIN = 0.1           # 前方检测区左右各比车宽多出
-TURN_MARGIN = 0.25          # 原地转向时车身外一圈检测宽度
+TURN_MARGIN = 0.1           # 原地转向：车角扫过的圆再外扩
 OBST_LOW, OBST_HIGH = 0.10, 1.6     # 地面以上该高度区间才算障碍
 MIN_POINTS = 5              # 区域内至少这么多点才判为障碍（抗噪）
 CLEAR_HOLD = 2.0            # 障碍消失后等待秒数
@@ -53,7 +53,7 @@ class Gate:
         self.max_speed = float(rospy.get_param("~max_speed", 0.3))
         self.heartbeat = 0.0
         self.loc_state = "unlocalized"
-        self.floor = rospy.get_param("~floor_z", None)   # 雷达坐标系下的地面高度
+        self.floor = rospy.get_param("~floor_z", None)   # body 坐标系下的地面高度
         self.floor_samples = []
         self.front_hits = self.ring_hits = 0
         self.blocked_since = None
@@ -85,12 +85,12 @@ class Gate:
         dt = np.dtype({"names": ["x", "y", "z"], "formats": ["<f4"] * 3,
                        "offsets": [off["x"], off["y"], off["z"]], "itemsize": msg.point_step})
         p = np.frombuffer(msg.data, dtype=dt, count=msg.width * msg.height)
-        x, y, z = p["x"], p["y"], p["z"]
-        ok = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-        x, y, z = x[ok], y[ok], z[ok]
+        xyz = np.stack([p["x"], p["y"], p["z"]], 1).astype(np.float64)
+        # 统一在 body 系里判断（外参与车身轮廓见 vehicle.py）
+        x, y, z =lidar_to_body(xyz[np.isfinite(xyz).all(1)]).T
 
         if self.floor is None:
-            # 自动标定地面：车周 1~5 m、低于雷达的点，高度直方图峰值
+            # 自动标定地面：车周 1~5 m、低于车体原点的点，高度直方图峰值
             r = np.hypot(x, y)
             m = (r > 1.0) & (r < 5.0) & (z < -0.1)
             if m.sum() > 500:
@@ -100,19 +100,18 @@ class Gate:
                 hist, edges = np.histogram(zz, bins=np.arange(zz.min(), zz.max() + 0.02, 0.02))
                 i = int(np.argmax(hist))
                 self.floor = float((edges[i] + edges[i + 1]) / 2)
-                rospy.loginfo("floor z (lidar frame) = %.3f", self.floor)
+                rospy.loginfo("floor z (body frame) = %.3f", self.floor)
             return
 
         h = z - self.floor
         band = (h > OBST_LOW) & (h < OBST_HIGH)
         x, y = x[band], y[band]
-        ax, ay = np.abs(x), np.abs(y)
-        not_self = (ax > HALF_LEN + SELF_MARGIN) | (ay > HALF_WID + SELF_MARGIN)
+        not_self = ~inside_body(x, y)
         with self.lock:
             v = self.cmd.linear.x
-        reach = HALF_LEN + FRONT_MIN + FRONT_PER_V * max(0.0, v)
-        front = (x > HALF_LEN + SELF_MARGIN) & (x < reach) & (ay < HALF_WID + SIDE_MARGIN)
-        ring = not_self & (ax < HALF_LEN + TURN_MARGIN) & (ay < HALF_WID + TURN_MARGIN)
+        reach = FRONT + FRONT_MIN + FRONT_PER_V * max(0.0, v)
+        front = (x > FRONT + SELF_MARGIN) & (x < reach) & (np.abs(y) < HALF_WID + SIDE_MARGIN)
+        ring = not_self & (np.hypot(x, y) < SWEEP_R + TURN_MARGIN)
         with self.lock:
             self.front_hits, self.ring_hits = int(front.sum()), int(ring.sum())
             self.scan_t = time.time()
@@ -145,7 +144,7 @@ class Gate:
         if hit:
             self.blocked_since = self.blocked_since or now
             self.clear_since = None
-            where = "前方" if moving_fwd else "车身周围"
+            where = "前方" if moving_fwd else "转向范围内"
             return "blocked", f"{where}有障碍，等待中（{now - self.blocked_since:.0f} s）", 0, 0
         if self.blocked_since is not None:
             self.clear_since = self.clear_since or now

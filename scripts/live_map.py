@@ -27,13 +27,14 @@ import rospy
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2
 
+from vehicle import drop_self
+
 CELL = 0.05                 # 栅格边长 (m)
 TILE = 256                  # 每个 tile 256x256 格
 EMPTY = -32768              # 空格子
 Z_STEP_CM = 5               # 高度至少升高 5 cm 才推送更新
 SCAN_MAX = 6000             # 每帧推送的当前扫描格子上限
 BLIND = 0.5                 # 与 FAST-LIO blind 一致，去掉车身附近的点 (m)
-LIDAR_TO_IMU = np.array([0.0, 0.0, 0.28])   # 与 fastlio_360.yaml extrinsic_T 一致（R 为单位阵）
 PORT = 7012
 
 lock = threading.Lock()
@@ -77,7 +78,7 @@ def on_cloud(msg):
     if len(xyz) == 0:
         return
     R, t = tf
-    xyz = (xyz + LIDAR_TO_IMU) @ R.T + t
+    xyz = drop_self(xyz) @ R.T + t
     ix = np.floor(xyz[:, 0] / CELL).astype(np.int64)
     iy = np.floor(xyz[:, 1] / CELL).astype(np.int64)
     zc = np.clip(np.round(xyz[:, 2] * 100), -32000, 32000).astype(np.int32)

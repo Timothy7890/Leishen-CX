@@ -1,5 +1,5 @@
 # FAST-LIO 参数（360° 版本）。由 record.sh 通过 rosparam load 加载到全局命名空间。
-# 相对原 ~/workspace/fast_lio 配置的改动：fov_degree 180 -> 360，blind 2 -> 0.5，
+# 相对原 ~/workspace/fast_lio 配置的改动：fov_degree 180 -> 360，blind 2 -> 0.8，
 # dense_publish_en true -> false，timestamp_unit 2 -> 0
 
 common:
@@ -15,7 +15,9 @@ preprocess:
     # 点云 time 字段单位: 0-s, 1-ms, 2-us, 3-ns。镭神驱动输出的是秒（每帧 0~0.1）；
     # 原配置误设为 2，FAST-LIO 运动补偿失效，转弯后地图出现重影
     timestamp_unit: 0
-    blind: 0.5                   # 小于该距离 (m) 的点不参与建图
+    # 小于该距离 (m) 的点不参与建图。车尾部件在雷达后方 0.53~0.68 m，会被最下面两条线扫到，
+    # 这些点跟着车走，会把里程计往"没动"拉；FAST-LIO 只能按半径过滤，故取 0.8
+    blind: 0.8
 
 mapping:
     acc_cov: 0.1
